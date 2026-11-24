@@ -1,0 +1,184 @@
+# channels.yaml — Multi-channel configuration for Almighty Anand Studio
+# Supports dual-channel: English main + Hindi auto-dubbed twin
+
+channels:
+  # ── Primary English Channel ───────────────────────────────────────
+  english:
+    name: "Almighty Anand"
+    channel_id: "${YOUTUBE_CHANNEL_ID_EN}"
+    language: "en"
+    region: "IN"
+    enabled: true
+
+    content_types:
+      long_form:
+        enabled: true
+        format: "16:9"
+        resolution: "1920x1080"
+        duration_range: [480, 720]       # 8-12 minutes
+        codec: "libx264"
+        upload_schedule: "optimal"        # Uses analytics-driven scheduling
+        max_per_day: 1
+        min_gap_hours: 12
+
+      shorts:
+        enabled: true
+        format: "9:16"
+        resolution: "1080x1920"
+        duration_range: [30, 60]          # 30-60 seconds
+        codec: "libx264"
+        upload_schedule: "optimal"
+        max_per_day: 3
+        min_gap_hours: 4
+
+    categories:
+      - technology
+      - finance
+      - spirituality
+      - life-hacks
+
+    branding:
+      intro_audio: "assets/branding/intro_en.wav"
+      outro_audio: "assets/branding/outro_en.wav"
+      watermark: "assets/branding/watermark.png"
+      end_screen_template: "assets/branding/end_screen_en.png"
+      channel_banner: "assets/branding/banner_en.png"
+
+    seo:
+      default_tags:
+        - "Almighty Anand"
+        - "technology"
+        - "finance"
+        - "life hacks"
+        - "Indian tech"
+      description_footer: |
+        🔔 Subscribe for daily tech, finance, and life wisdom!
+        📸 Instagram: @almightyanand
+        ⚠ Affiliate links may earn a commission at no extra cost to you.
+
+    monetization:
+      adsense_enabled: true
+      affiliate_links:
+        technology:
+          - label: "My Gadgets"
+            url: "${AFFILIATE_TECH_URL}"
+          - label: "Best Tech Books"
+            url: "${AFFILIATE_BOOKS_URL}"
+        finance:
+          - label: "Start Investing"
+            url: "${AFFILIATE_BROKER_URL}"
+        spirituality:
+          - label: "Sacred Texts"
+            url: "${AFFILIATE_SPIRITUAL_URL}"
+
+      sponsorship_rate_card:
+        shorts: 50          # USD per sponsored Short
+        long_form: 200      # USD per sponsored long-form
+        dedicated: 500      # USD per dedicated sponsor video
+
+  # ── Hindi Auto-Dubbed Twin Channel ────────────────────────────────
+  hindi:
+    name: "Almighty Anand Hindi"
+    channel_id: "${YOUTUBE_CHANNEL_ID_HI}"
+    language: "hi"
+    region: "IN"
+    enabled: true
+    source_channel: "english"             # Derives content from English channel
+
+    dubbing:
+      engine: "voicestudio"               # Uses VoiceStudio TTS on GPU VM
+      voice_profile: "almighty_anand_hindi_v1"
+      translation_model: "gemini-flash"   # Free-tier translation
+      quality_check: true                 # LLM reviews translation quality
+
+    content_types:
+      long_form:
+        enabled: true
+        format: "16:9"
+        resolution: "1920x1080"
+        duration_range: [480, 840]        # Hindi tends to be slightly longer
+        codec: "libx264"
+        upload_schedule: "delayed"        # Upload 24h after English version
+        delay_hours: 24
+        max_per_day: 1
+
+      shorts:
+        enabled: true
+        format: "9:16"
+        resolution: "1080x1920"
+        duration_range: [30, 60]
+        codec: "libx264"
+        upload_schedule: "delayed"
+        delay_hours: 12
+        max_per_day: 3
+
+    categories:
+      - technology
+      - finance
+      - spirituality
+      - life-hacks
+
+    branding:
+      intro_audio: "assets/branding/intro_hi.wav"
+      outro_audio: "assets/branding/outro_hi.wav"
+      watermark: "assets/branding/watermark.png"
+
+    seo:
+      default_tags:
+        - "Almighty Anand Hindi"
+        - "टेक्नोलॉजी"
+        - "फाइनेंस"
+        - "लाइफ हैक्स"
+        - "हिंदी टेक"
+      description_footer: |
+        🔔 रोज़ टेक, फाइनेंस और जीवन के ज्ञान के लिए सब्सक्राइब करें!
+        📸 Instagram: @almightyanand
+        🌐 English Channel: @almightyanand
+
+    monetization:
+      adsense_enabled: true
+      affiliate_links:
+        technology:
+          - label: "मेरे गैजेट्स"
+            url: "${AFFILIATE_TECH_URL}"
+
+# ── Instagram Configuration ─────────────────────────────────────────
+instagram:
+  account: "almightyanand"
+  enabled: true
+  reels:
+    enabled: true
+    format: "9:16"
+    codec: "libx265"
+    max_per_day: 3
+    source: "shorts"                      # Repost Shorts as Reels (H.265 transcode)
+    delay_hours: 2                        # Post 2h after YouTube Short
+    hashtag_strategy: "niche_trending"
+    max_hashtags: 30
+
+  stories:
+    enabled: false                        # Future: auto-post stories from analytics highlights
+    source: "analytics_highlights"
+
+# ── Global Settings ──────────────────────────────────────────────────
+global:
+  timezone: "Asia/Kolkata"
+  content_review:
+    auto_publish: true                    # Set to false for manual review before publishing
+    safety_check: true                    # LLM reviews for policy compliance before upload
+    copyright_scan: true                  # Check for potential copyright issues
+
+  analytics:
+    daily_report_time_utc: "06:00"
+    retention_target_pct: 50
+    ctr_target_pct: 6.0
+    views_target_weekly: 10000
+
+  notifications:
+    enabled: true
+    channels:
+      - type: "redis"
+        key: "notifications:alerts"
+      - type: "email"
+        address: "${ALERT_EMAIL}"
+        severity: "critical"              # Only email for critical alerts

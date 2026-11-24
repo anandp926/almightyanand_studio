@@ -1,0 +1,88 @@
+# docker-compose.gpu.yml — On-demand Spot GPU Stack
+# Runs on: g2-standard-4 (4 vCPU, 16 GB RAM, 1× NVIDIA L4 24GB) — Spot pricing ~$0.40/hr
+# Started/stopped by gpu_controller.py; hard cap 4.5 hr/day
+# Default state: STOPPED
+
+version: "3.9"
+
+services:
+  # ── VoiceStudio: TTS & Voice Cloning ─────────────────────────────
+  voicestudio:
+    image: python:3.12-slim
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./data/voice_samples:/app/voice_samples:ro
+      - ./data/voice_output:/app/output
+    environment:
+      - REDIS_URL=redis://${CPU_VM_IP}:6379/3
+      - CUDA_VISIBLE_DEVICES=0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    ports:
+      - "8090:8090"
+    command: >
+      bash -c "pip install --no-cache-dir TTS torch torchaudio fastapi uvicorn redis soundfile &&
+               python -m uvicorn voicestudio:app --host 0.0.0.0 --port 8090"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Open-Gen-AI: B-roll & Thumbnail Generation ──────────────────
+  opengenai:
+    image: python:3.12-slim
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./data/image_output:/app/output
+      - ./skills:/app/skills:ro
+    environment:
+      - REDIS_URL=redis://${CPU_VM_IP}:6379/4
+      - CUDA_VISIBLE_DEVICES=0
+      - MODEL_ID=stabilityai/stable-diffusion-xl-base-1.0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    ports:
+      - "8091:8091"
+    command: >
+      bash -c "pip install --no-cache-dir diffusers transformers accelerate torch fastapi uvicorn redis Pillow &&
+               python -m uvicorn opengenai:app --host 0.0.0.0 --port 8091"
+
+  # ── Maestro: AI Music Generation ────────────────────────────────
+  maestro:
+    image: python:3.12-slim
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./data/music_output:/app/output
+    environment:
+      - REDIS_URL=redis://${CPU_VM_IP}:6379/5
+      - CUDA_VISIBLE_DEVICES=0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    ports:
+      - "8092:8092"
+    command: >
+      bash -c "pip install --no-cache-dir audiocraft torch torchaudio fastapi uvicorn redis soundfile &&
+               python -m uvicorn maestro:app --host 0.0.0.0 --port 8092"
+
+networks:
+  default:
+    name: almighty_gpu_net

@@ -1,0 +1,101 @@
+# docker-compose.yml — Always-on CPU Stack
+# Runs on: e2-medium (2 vCPU, 4 GB RAM) — ~$25/month
+# Purpose: Orchestration, LLM routing, caching, scheduling
+
+version: "3.9"
+
+services:
+  # ── Redis: Job queue, caching, rate limiting ──────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru --save 60 1000
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ── OmniRoute: LLM Gateway with free-tier fallback chains ───────
+  omniroute:
+    image: python:3.12-slim
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./configs/omniroute_config.json:/app/config.json:ro
+      - ./skills:/app/skills:ro
+    environment:
+      - OMNIROUTE_CONFIG=/app/config.json
+      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: >
+      bash -c "pip install --no-cache-dir fastapi uvicorn httpx redis aiohttp litellm &&
+               python -m uvicorn omniroute:app --host 0.0.0.0 --port 8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
+  # ── FreeLLMAPI: Aggregates free-tier LLM endpoints ──────────────
+  freellm:
+    image: python:3.12-slim
+    restart: unless-stopped
+    working_dir: /app
+    environment:
+      - REDIS_URL=redis://redis:6379/1
+    env_file:
+      - .env
+    ports:
+      - "8081:8081"
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: >
+      bash -c "pip install --no-cache-dir fastapi uvicorn httpx redis google-generativeai groq &&
+               python -m uvicorn freellm:app --host 0.0.0.0 --port 8081"
+
+  # ── Orchestrator: Main production pipeline controller ────────────
+  orchestrator:
+    image: python:3.12-slim
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./agents:/app/agents:ro
+      - ./configs:/app/configs:ro
+      - ./skills:/app/skills:ro
+      - ./data:/app/data
+    environment:
+      - REDIS_URL=redis://redis:6379/2
+      - OMNIROUTE_URL=http://omniroute:8080
+      - FREELLM_URL=http://freellm:8081
+      - GPU_CONTROLLER_ENABLED=true
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+      omniroute:
+        condition: service_healthy
+    command: >
+      bash -c "pip install --no-cache-dir redis schedule yt-dlp feedparser google-api-python-client
+               google-auth-oauthlib instagrapi whisper-timestamped Pillow &&
+               python -m agents.orchestrator"
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  default:
+    name: almighty_cpu_net

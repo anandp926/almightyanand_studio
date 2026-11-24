@@ -1,0 +1,154 @@
+{
+  "version": "1.0",
+  "description": "OmniRoute LLM Gateway — Free-tier fallback chains with token compression",
+
+  "default_model": "auto",
+  "max_retries": 3,
+  "retry_delay_ms": 1000,
+  "request_timeout_seconds": 120,
+  "token_compression_enabled": true,
+
+  "models": {
+    "gemini-flash": {
+      "provider": "google",
+      "model_id": "gemini-2.0-flash",
+      "api_base": "https://generativelanguage.googleapis.com/v1beta",
+      "tier": "free",
+      "rate_limit_rpm": 15,
+      "rate_limit_tpd": 1000000,
+      "max_tokens": 8192,
+      "cost_per_1k_input": 0.0,
+      "cost_per_1k_output": 0.0,
+      "priority": 1,
+      "capabilities": ["text", "json_mode", "function_calling"],
+      "notes": "Primary free-tier model — 15 RPM, 1M TPD free"
+    },
+
+    "gemini-pro": {
+      "provider": "google",
+      "model_id": "gemini-2.0-pro",
+      "api_base": "https://generativelanguage.googleapis.com/v1beta",
+      "tier": "free",
+      "rate_limit_rpm": 2,
+      "rate_limit_tpd": 50000,
+      "max_tokens": 8192,
+      "cost_per_1k_input": 0.0,
+      "cost_per_1k_output": 0.0,
+      "priority": 2,
+      "capabilities": ["text", "json_mode", "function_calling", "reasoning"],
+      "notes": "High-quality free tier — 2 RPM, 50K TPD"
+    },
+
+    "llama-groq": {
+      "provider": "groq",
+      "model_id": "llama-3.3-70b-versatile",
+      "api_base": "https://api.groq.com/openai/v1",
+      "tier": "free",
+      "rate_limit_rpm": 30,
+      "rate_limit_tpd": 14400,
+      "max_tokens": 8000,
+      "cost_per_1k_input": 0.0,
+      "cost_per_1k_output": 0.0,
+      "priority": 3,
+      "capabilities": ["text", "json_mode"],
+      "notes": "Groq free tier — fast inference, 30 RPM"
+    },
+
+    "mistral-free": {
+      "provider": "mistral",
+      "model_id": "mistral-small-latest",
+      "api_base": "https://api.mistral.ai/v1",
+      "tier": "free",
+      "rate_limit_rpm": 10,
+      "rate_limit_tpd": 500000,
+      "max_tokens": 4096,
+      "cost_per_1k_input": 0.0,
+      "cost_per_1k_output": 0.0,
+      "priority": 4,
+      "capabilities": ["text", "json_mode"],
+      "notes": "Mistral free tier fallback"
+    },
+
+    "openrouter-free": {
+      "provider": "openrouter",
+      "model_id": "meta-llama/llama-3.3-8b-instruct:free",
+      "api_base": "https://openrouter.ai/api/v1",
+      "tier": "free",
+      "rate_limit_rpm": 20,
+      "rate_limit_tpd": 200000,
+      "max_tokens": 4096,
+      "cost_per_1k_input": 0.0,
+      "cost_per_1k_output": 0.0,
+      "priority": 5,
+      "capabilities": ["text"],
+      "notes": "OpenRouter free models — last-resort fallback"
+    },
+
+    "gpt4o-mini": {
+      "provider": "openai",
+      "model_id": "gpt-4o-mini",
+      "api_base": "https://api.openai.com/v1",
+      "tier": "paid",
+      "rate_limit_rpm": 60,
+      "max_tokens": 4096,
+      "cost_per_1k_input": 0.00015,
+      "cost_per_1k_output": 0.0006,
+      "priority": 10,
+      "capabilities": ["text", "json_mode", "function_calling"],
+      "notes": "Paid fallback — only for complex scripts when free tiers exhausted"
+    }
+  },
+
+  "fallback_chains": {
+    "script_writing": {
+      "description": "Chain for script generation (needs JSON mode + quality)",
+      "models": ["gemini-flash", "gemini-pro", "llama-groq", "gpt4o-mini"],
+      "max_cost_per_request": 0.05
+    },
+    "analysis": {
+      "description": "Chain for trend analysis and scoring",
+      "models": ["gemini-flash", "llama-groq", "mistral-free", "openrouter-free"],
+      "max_cost_per_request": 0.0
+    },
+    "seo_generation": {
+      "description": "Chain for titles, descriptions, tags",
+      "models": ["gemini-flash", "llama-groq", "mistral-free"],
+      "max_cost_per_request": 0.0
+    },
+    "translation": {
+      "description": "Chain for English → Hindi dubbing scripts",
+      "models": ["gemini-flash", "gemini-pro", "gpt4o-mini"],
+      "max_cost_per_request": 0.02
+    }
+  },
+
+  "token_compression": {
+    "enabled": true,
+    "strategy": "structured_json",
+    "max_context_tokens": 4096,
+    "summarize_above_tokens": 3000,
+    "compression_model": "gemini-flash",
+    "rules": [
+      "Remove redundant whitespace and formatting from prompts",
+      "Use abbreviated keys in JSON prompts (e.g., 't' for 'title')",
+      "Summarize long context windows before sending to paid models",
+      "Cache common system prompts in Redis to avoid re-sending"
+    ]
+  },
+
+  "rate_limiting": {
+    "enabled": true,
+    "backend": "redis",
+    "redis_key_prefix": "omniroute:ratelimit",
+    "strategy": "sliding_window",
+    "burst_allowance": 1.5
+  },
+
+  "monitoring": {
+    "log_all_requests": true,
+    "log_costs": true,
+    "daily_cost_alert_usd": 0.50,
+    "monthly_cost_cap_usd": 15.0,
+    "redis_metrics_key": "omniroute:metrics"
+  }
+}
