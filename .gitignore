@@ -16,11 +16,13 @@ venv/
 # Data & outputs (tracked via GCS, not git)
 data/
 renders/
+memory/*.db
 *.mp4
 *.wav
 *.mp3
 *.aac
 *.srt
+*.ass
 
 # OS
 .DS_Store

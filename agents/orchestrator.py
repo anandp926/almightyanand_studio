@@ -3,7 +3,7 @@
 orchestrator.py — Master Autonomous Pipeline Runner
 
 Executes the end-to-end multi-agent video production cycle:
-  TrendScout -> ScriptDirector -> MediaDispatcher -> EditorFFmpeg -> Publisher -> AnalyticsReviewer
+  CEOPlanner / TrendScout -> ScriptDirector -> MediaDispatcher -> EditorFFmpeg -> Publisher -> AnalyticsReviewer
 
 CLI Entrypoint:
     python -m agents.orchestrator [--dry-run]
@@ -15,6 +15,7 @@ import logging
 import sys
 from datetime import datetime, timezone
 
+from agents.memory_store import MemoryStore
 from agents.trend_scout import TrendScout
 from agents.script_director import ScriptDirector
 from agents.media_dispatcher import MediaDispatcher
@@ -35,17 +36,19 @@ def run_pipeline(dry_run: bool = True):
     log.info(f"Mode: {'--dry-run (0 GPU Credits Spent)' if dry_run else 'PRODUCTION'}")
     log.info("=" * 70)
 
-    # 1. Trend Discovery
-    log.info("\n[STAGE 1/6] TrendScout: Discovering & Scoring High-Virality Topics...")
+    # 1. Trend Discovery & Freshness Verification
+    log.info("\n[STAGE 1/6] TrendScout: Discovering Live Indian & Global Trends...")
     scout = TrendScout(dry_run=dry_run)
-    topic = scout.run_dry_run()
+    topic = scout.discover_live_candidate()
 
-    # 2. Transformative Scripting & Shot Cards
-    log.info("\n[STAGE 2/6] ScriptDirector: Formulating Transformative Script & Shot Cards...")
+    # 2. Transformative Scripting & Shot Cards (Hinglish Mandate)
+    log.info("\n[STAGE 2/6] ScriptDirector: Formulating Transformative Hinglish Script & Shot Cards...")
     director = ScriptDirector(dry_run=dry_run)
     script_package = director.build_transformative_package({
         "title": topic.title,
         "category": topic.category,
+        "source": topic.source,
+        "source_url": topic.source_url,
     })
 
     # 3. Media Dispatching (Voice + B-roll + Music)
@@ -73,7 +76,8 @@ def run_pipeline(dry_run: bool = True):
 
     log.info("\n" + "=" * 70)
     log.info("🎉 PIPELINE RUN COMPLETE — ALL 6 STAGES PASSED CLEANLY")
-    log.info(f"Visual Transformation Ratio: {script_package.transformation_ratio * 100:.0f}% (>= 70% threshold PASSED)")
+    log.info(f"Topic Selected: {topic.title}")
+    log.info(f"Visual Transformation Ratio: {script_package.transformation_ratio * 100:.0f}% (>= 75% threshold PASSED)")
     log.info(f"Long-Form Asset: {render_output.long_form_16x9_path}")
     log.info(f"Shorts Assets Spawned: {len(render_output.shorts_9x16_paths)} variants")
     log.info(f"Affiliate Links Attached: {len(script_package.affiliate_links)}")

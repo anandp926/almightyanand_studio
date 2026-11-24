@@ -12,13 +12,14 @@
 │                      ALWAYS-ON CPU ORCHESTRATOR (24/7 Stack)                      │
 │                e2-medium (2 vCPU, 4 GB RAM) · ~$25/month · Mumbai / US            │
 ├────────────────────┬────────────────────┬───────────────────┬─────────────────────┤
-│    TrendScout      │   ScriptDirector   │     Publisher     │  AnalyticsReviewer  │
-│  (yt-dlp & RSS)    │ (visual-skills +   │ (YouTube API v3   │ (Retention & CTR    │
-│                    │  Anti-Demonetize)  │  + Affiliates)    │  Feedback Loop)     │
+│     CEOPlanner     │     TrendScout     │  ScriptDirector   │  AnalyticsReviewer  │
+│ (Goal & Pivots)    │ (Live RSS Scout)   │(Hinglish & Cards) │ (Retention & CTR    │
+│                    │                    │                   │  Feedback Loop)     │
 ├────────────────────┴────────────────────┴───────────────────┴─────────────────────┤
+│ • MemoryStore (SQLite: `memory/published_topics.db` — 100% Zero Topic Duplication)│
 │ • Redis 7 (Job Queue & State)                                                     │
 │ • OmniRoute Gateway (:8080) — Free-tier routing + token compression               │
-│ • FreeLLMAPI (:8081) — Upstream zero-cost LLM aggregator                          │
+│ • FreeLLMAPI (:8081) — Upstream zero-cost LLM aggregator (Groq 120B / Gemini)     │
 └─────────────────────────────────────────┬─────────────────────────────────────────┘
                                           │ (Woken on-demand by gpu_controller.py)
                                           ▼
@@ -35,6 +36,18 @@
 
 ---
 
+## 👑 Autonomous Goal-Driven Control Loop (`ceo_planner.py`)
+
+Almighty Anand Studio runs autonomously with **zero human babysitting**:
+- **North Star Goal**: Maximize views, subscriber growth, average view duration (**AVD > 75% on Shorts**, **> 45% on long-form**), and monetization (YPP + affiliate revenue) within the $250 / 2.5-month GCP budget ($100/mo cap).
+- **Persistent Memory & Zero Duplication (`memory/published_topics.db`)**: Every live candidate is hashed and checked against SQLite using Jaccard token similarity. Old topics are never recycled.
+- **Strict Hinglish Mandate**: High-energy conversational Indian Hinglish (e.g., *"Bhai, kya aapko pata hai..."*, *"Agar aapka bank account freeze ho gaya to..."*). No corporate English or textbook translations.
+- **Safe-Zone Burnt-In Subtitles**: Lower-middle frame height (`y = 78%` to `81%`, `MarginV=360`), avoiding collisions with character faces, top headers, or bottom platform UI buttons.
+- **Zero Tofu Box (`□`) Fix**: Automatic sanitization of `₹` to `Rs. ` and stripping unsupported emojis before FFmpeg font rendering.
+- **Autonomous 3-Day Pivoting**: If a visual style underperforms (<65% AVD) for 3 consecutive days, `CEOPlanner` automatically pivots between styles (`commentary_broll` ➔ `origami_breakdown` ➔ `retro_pixel_art` ➔ `anime_epic`).
+
+---
+
 ## 💰 $250 / 2.5-Month Budget Guardrails ($100/mo Cap)
 
 | Component | Resource | Schedule | Est. Monthly Cost | 2.5-Month Total | Guardrail Mechanism |
@@ -42,7 +55,7 @@
 | **24/7 Orchestrator** | `e2-medium` (2 vCPU, 4GB RAM) | Always-on (730 hrs/mo) | ~$25 – $29 | ~$62.50 – $72.50 | Fixed CPU tier, zero GPU idle waste |
 | **GPU Render Worker** | `g2-standard-4 Spot` (NVIDIA L4) | Batched ~4.5 hrs/day | ~$55 | ~$137.50 | Hard kill-switch at 4.5 hrs/day; auto-stops on 5m idle |
 | **Storage & Egress** | 100 GB PD + GCS Bucket | 24/7 | ~$10 | ~$25.00 | 30-day lifecycle auto-cleanup on raw intermediate clips |
-| **LLM Inference** | OmniRoute + FreeLLMAPI | Real-time | **$0.00** | **$0.00** | Free Gemini 2.0 Flash + Groq Llama 3.3 70B fallbacks |
+| **LLM Inference** | OmniRoute + FreeLLMAPI | Real-time | **$0.00** | **$0.00** | Free Groq 120B (`openai/gpt-oss-120b`) + Gemini Flash fallbacks |
 | **Emergency Buffer** | Billing Alert + Soft Pause | On-demand | ~$10 | ~$15.00 – $25.00 | Soft-pause non-essential jobs if burn rate > $3.33/day |
 | **Total** | | | **~$100/mo** | **~$250.00** | **Strict Hard Cap** |
 
@@ -72,68 +85,26 @@ Rev: $0            Rev: ~$15–$30     Rev: ~$80–$120    Rev: ~$200–$300    
 | **[tashfeenahmed/freellmapi](https://github.com/tashfeenahmed/freellmapi)** | Free LLM Aggregator | Wired as `freellm` service (:8081) in `docker-compose.yml`. Acts as OmniRoute's upstream fallback before any paid endpoints. |
 | **[smixs/visual-skills](https://github.com/smixs/visual-skills)** | Cinematography Prompt Guides | Loaded in `skills/visual-skills/` + custom templates in `skills/templates/` (`anime_epic.yaml`, `retro_pixel_art.yaml`, `origami_breakdown.yaml`, `commentary_broll.yaml`). |
 | **[debpalash/voicestudio](https://github.com/debpalash/voicestudio)** | Voice Cloning & Dubbing | Wired as `voicestudio` (:8090) in `docker-compose.gpu.yml`. Clones Anand's voice profile and generates auto-Hindi dubs. |
-| **[anil-matcha/open-generative-ai](https://github.com/anil-matcha/open-generative-ai)** | Visual & Lip-Sync B-Roll | Wired as `opengenai` (:8091) in `docker-compose.gpu.yml`. Synthesizes custom B-roll replacing >70% of trending video visuals. |
+| **[anil-matcha/open-generative-ai](https://github.com/anil-matcha/open-generative-ai)** | Visual & Lip-Sync B-Roll | Wired as `opengenai` (:8091) in `docker-compose.gpu.yml`. Synthesizes custom B-roll replacing >75% of trending video visuals. |
 | **[Blizaine/Maestro](https://github.com/Blizaine/Maestro)** | AI Background Music | Wired as `maestro` (:8092) in `docker-compose.gpu.yml`. Composes royalty-free background soundtracks ducked at -16.0 LUFS. |
 
 ---
 
-## 🛡 Hardcoded Anti-Demonetization Policy (Step 4)
-
-Hardcoded directly in [`agents/script_director.py`](agents/script_director.py) and [`agents/editor_ffmpeg.py`](agents/editor_ffmpeg.py):
-
-- **No Raw Re-uploads**: Prohibits raw cut-and-reupload of trending videos to prevent YouTube Reused/Inauthentic Content demonetization.
-- **Mandatory Transformation (>70%)**: Enforces `MIN_VISUAL_TRANSFORMATION_RATIO = 0.75`. The assembly agent aborts if original B-roll / animations do not exceed 70% of the timeline.
-- **Dual-Format Output**: Every long-form (16:9) topic automatically spawns 2–3 vertical (9:16) Shorts with suspense/cliffhanger endings.
-- **Broadcast Audio Standard**: All video streams pass through FFmpeg `loudnorm=I=-16:TP=-1.5:LRA=11` with background audio ducked to -18 dB.
-
----
-
-## 🚀 Local CLI Testing & Dry-Run Pipeline
-
-Run any agent or the complete end-to-end pipeline locally without incurring any GPU or API expenses:
+## 🚀 Local CLI Testing & Autonomous Commands
 
 ```bash
-# 1. Test individual agents locally
+# 1. Run the master autonomous CEO planner (Discovers live fresh trend & plans daily package)
+python3 -m agents.ceo_planner --run-today
+
+# 2. Plan + Render a verified vertical Short (1080x1920, Hinglish, safe-zone captions)
+python3 -m agents.ceo_planner --render-short
+
+# 3. Test individual agents locally
 python3 -m agents.trend_scout --dry-run
 python3 -m agents.script_director --dry-run
-python3 -m agents.media_dispatcher --dry-run
 python3 -m agents.editor_ffmpeg --dry-run
-python3 -m agents.publisher --dry-run
 python3 -m agents.analytics_reviewer --dry-run
 
-# 2. Run the complete Master Orchestrator Pipeline
+# 4. Run the complete 6-stage autonomous production cycle
 python3 -m agents.orchestrator --dry-run
-```
-
----
-
-## ⚙️ Environment Configuration (`.env`)
-
-Copy `.env.example` to `.env`. For local testing on free tokens, you only need `GOOGLE_API_KEY`:
-
-```bash
-# Required Free Tier LLM Key (Google AI Studio)
-GOOGLE_API_KEY=your_gemini_api_key
-
-# Optional Free Tier LLM Key (Groq)
-GROQ_API_KEY=your_groq_api_key
-
-# YouTube Verified Credentials (auto-linked)
-YOUTUBE_CHANNEL_ID_EN=UCiyowMaCWGFMjPka0TDamVg
-YOUTUBE_OAUTH_CREDS=configs/youtube_token.json
-YOUTUBE_CLIENT_SECRETS=configs/client_secrets.json
-
-# Monetization Affiliates (Optional)
-AFFILIATE_TECH_URL=https://amzn.to/your-tech-tag
-AFFILIATE_BOOKS_URL=https://amzn.to/your-books-tag
-```
-
----
-
-## ☁️ Single Command GCP Cloud Deployment
-
-Once local testing passes, deploy to your GCP project (`almighty-anand-studio`) with one command:
-
-```bash
-gcloud compute ssh almightyanand-studio --zone=asia-south1-a --project=almighty-anand-studio --command="if [ ! -d ~/almightyanand_studio ]; then git clone https://github.com/anandp926/almightyanand_studio.git ~/almightyanand_studio; else cd ~/almightyanand_studio && git pull origin main; fi && cd ~/almightyanand_studio && docker compose up -d"
 ```
