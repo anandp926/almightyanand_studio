@@ -1,0 +1,20 @@
+name: retro_pixel_art
+description: 16-bit SNES / Genesis nostalgic pixel art with CRT scanlines and vibrant 90s palette
+camera_language:
+  shots:
+    - isometric_overview: "Isometric 2.5D game view of money flow / server farm"
+    - boss_battle_dialogue: "Retro RPG text box at bottom with pixelated Anand avatar speaking"
+    - side_scroll_chase: "Parallax scrolling background with foreground action"
+lighting_and_palette:
+  key: "16-color limited palette, cyan (#06B6D4) and magenta (#D946EF)"
+  mood: "Chiptune adventure, playful nostalgia"
+cinematography_rules:
+  frame_rate: 30
+  aspect_ratio_16x9: "1920x1080"
+  aspect_ratio_9x16: "1080x1920"
+  sub_shot_pacing_seconds: 3.0
+  overlay_typography: "Press Start 2P or 8-bit monospace with pixel border"
+prompt_template: >
+  Intricate 16-bit pixel art scene, {character_or_subject}, detailed sprite work,
+  nostalgic 90s video game cutscene, vibrant color palette, subtle CRT scanline effect,
+  clean pixel perfect rendering.

@@ -1,0 +1,20 @@
+name: commentary_broll
+description: Premium cinematic documentary B-roll designed to replace >70% of trending raw video
+camera_language:
+  shots:
+    - cinematic_gimbal_push: "Smooth forward dolly tracking shot past futuristic monitors"
+    - high_tech_data_tunnel: "Abstract glowing data stream visualising digital wealth / algorithms"
+    - host_avatar_reaction: "3D stylized character leaning in with knowing analytical expression"
+lighting_and_palette:
+  key: "Moody studio amber (#F59E0B) and teal (#0F766E) rim lighting with deep slate shadows"
+  mood: "Authoritative, confidential insider reveal"
+cinematography_rules:
+  frame_rate: 30
+  aspect_ratio_16x9: "1920x1080"
+  aspect_ratio_9x16: "1080x1920"
+  sub_shot_pacing_seconds: 2.0
+  overlay_typography: "Montserrat ExtraBold, high-contrast yellow/white emphasis markers"
+prompt_template: >
+  Cinematic documentary shot, {character_or_subject}, anamorphic 35mm lens, moody amber
+  and teal split lighting, atmospheric smoke haze, shallow depth of field, photorealistic,
+  8k post-production quality.

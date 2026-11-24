@@ -1,0 +1,20 @@
+name: anime_epic
+description: High-octane Japanese anime aesthetic with dynamic speed lines and dramatic rim lighting
+camera_language:
+  shots:
+    - extreme_low_angle_hero: "Worm's eye view, wide angle 24mm, dramatic perspective"
+    - dutch_angle_clash: "Tilted 15 degrees, high kinetic energy, rapid zoom-in"
+    - split_screen_reaction: "Dual vertical split showing host insight vs shocked subject"
+lighting_and_palette:
+  key: "Saturated neon amber (#F59E0B) and deep electric indigo (#6366F1)"
+  mood: "Shonen battle climax, high contrast cel-shading"
+cinematography_rules:
+  frame_rate: 30
+  aspect_ratio_16x9: "1920x1080"
+  aspect_ratio_9x16: "1080x1920"
+  sub_shot_pacing_seconds: 2.5
+  overlay_typography: "Impact Bold, white text with black 4px stroke and red drop shadow"
+prompt_template: >
+  Dynamic stylized anime scene, {character_or_subject}, high-octane anime visual style,
+  sharp cel shading, dramatic neon rim lighting with deep shadows, kinetic action lines,
+  cinematic composition, 8k resolution, trending on ArtStation.

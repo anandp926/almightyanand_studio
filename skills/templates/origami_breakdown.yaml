@@ -1,0 +1,20 @@
+name: origami_breakdown
+description: Tactile papercraft / origami stop-motion style for complex finance & tech breakdowns
+camera_language:
+  shots:
+    - tabletop_macro: "Top-down 90-degree flat lay with shallow depth of field (f/2.8)"
+    - unfolding_mechanism: "Continuous fold animation revealing hidden clauses/money leaks"
+    - stop_motion_pop: "Snappy 12fps paper pop-up graph displaying growth metrics"
+lighting_and_palette:
+  key: "Soft natural studio daylight with gentle paper texture shadows"
+  mood: "Clean, elegant, premium educational craftsmanship"
+cinematography_rules:
+  frame_rate: 30
+  aspect_ratio_16x9: "1920x1080"
+  aspect_ratio_9x16: "1080x1920"
+  sub_shot_pacing_seconds: 3.2
+  overlay_typography: "Minimalist geometric sans-serif (Inter / Montserrat Bold)"
+prompt_template: >
+  Tactile origami papercraft stop-motion diorama, {character_or_subject}, folded textured cardstock,
+  macro lens photography, warm ambient softbox lighting, miniature paper architecture,
+  exquisite geometric precision.
