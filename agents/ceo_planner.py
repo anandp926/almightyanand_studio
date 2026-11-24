@@ -59,6 +59,7 @@ class DailyCEODecision:
     shorts_variants: List[dict]
     affiliate_cta: str
     rendered_video_path: Optional[str] = None
+    qa_report: Optional[dict] = None
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
@@ -70,7 +71,7 @@ class CEOPlanner:
         self.director = ScriptDirector(dry_run=dry_run)
         self.editor = EditorFFmpeg(dry_run=dry_run)
 
-    def plan_today(self, render_short: bool = False) -> DailyCEODecision:
+    def plan_today(self, render_short: bool = False, override_topic: Optional[str] = None) -> DailyCEODecision:
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         log.info("=" * 70)
         log.info(f"👑 CEO PLANNER: INITIATING AUTONOMOUS CONTENT PLAN FOR {today_str}")
@@ -88,7 +89,14 @@ class CEOPlanner:
             active_style = current_style
 
         # 2. Scout 100% fresh, live trending topic
-        candidate = self.scout.discover_live_candidate()
+        if override_topic:
+            log.info(f"🎯 Target Topic Overridden via CLI: '{override_topic}'")
+            candidate = self.scout.discover_live_candidate()
+            candidate.title = override_topic
+            candidate.category = "technology"
+            candidate.source = "manual_override"
+        else:
+            candidate = self.scout.discover_live_candidate()
         log.info(f"✨ Fresh Candidate Locked: '{candidate.title}' (Source: {candidate.source})")
 
         # 3. Formulate Transformative Hinglish Script & Shot Cards
@@ -104,16 +112,19 @@ class CEOPlanner:
 
         # 4. Optional Immediate FFmpeg Video Render
         rendered_path = None
+        qa_dict = None
         if render_short and script_pkg.shorts_9x16_variants:
             log.info("🎥 Triggering Immediate FFmpeg Render for Short #1...")
             short_data = script_pkg.shorts_9x16_variants[0]
             output_file = f"short_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.mp4"
-            rendered_path = str(self.editor.assemble_vertical_short(
+            target_mp4, qa_report = self.editor.assemble_vertical_short(
                 script_data=short_data,
                 production_id=script_pkg.production_id,
                 output_filename=output_file,
-            ))
-            log.info(f"🎉 Short Video Render Complete: {rendered_path}")
+            )
+            rendered_path = str(target_mp4)
+            qa_dict = asdict(qa_report)
+            log.info(f"🎉 Short Video Render Complete: {rendered_path} (QA Status: {qa_report.status})")
 
         # 5. Record daily plan in persistent SQLite
         shorts_titles = [s.get("title", "") for s in script_pkg.shorts_9x16_variants]
@@ -140,6 +151,7 @@ class CEOPlanner:
             shorts_variants=script_pkg.shorts_9x16_variants,
             affiliate_cta=script_pkg.pinned_comment,
             rendered_video_path=rendered_path,
+            qa_report=qa_dict,
         )
 
         log.info("=" * 70)
@@ -156,11 +168,12 @@ def main():
     parser = argparse.ArgumentParser(description="Master CEO Planner Agent")
     parser.add_argument("--run-today", action="store_true", help="Plan today's content package")
     parser.add_argument("--render-short", action="store_true", help="Plan and render Short video with FFmpeg")
+    parser.add_argument("--topic", type=str, default=None, help="Explicit non-banking topic override")
     parser.add_argument("--dry-run", action="store_true", help="Run without external API calls")
     args = parser.parse_args()
 
     planner = CEOPlanner(dry_run=args.dry_run)
-    decision = planner.plan_today(render_short=args.render_short)
+    decision = planner.plan_today(render_short=args.render_short, override_topic=args.topic)
 
     print("\n--- CEO PLANNER DAILY DECISION ---")
     print(json.dumps(asdict(decision), indent=2))

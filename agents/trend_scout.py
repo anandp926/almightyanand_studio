@@ -131,34 +131,39 @@ class TrendScout:
 
     def fetch_google_news_india(self) -> List[TopicCandidate]:
         candidates = []
-        url = "https://news.google.com/rss/search?q=AI+tools+OR+cyber+fraud+OR+RBI+India&hl=en-IN&gl=IN&ceid=IN:en"
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"})
-        try:
-            with urllib.request.urlopen(req, timeout=8) as resp:
-                xml_data = resp.read()
-                root = ET.fromstring(xml_data)
-                for item in root.findall(".//item"):
-                    raw_title = item.find("title").text if item.find("title") is not None else ""
-                    if not raw_title:
-                        continue
-                    clean_title = re.sub(r" - [^-]+$", "", raw_title).strip()
-                    fit_score, cat = self._score_channel_fit(clean_title)
+        queries = [
+            "OpenAI+OR+Google+Gemini+OR+DeepSeek+OR+AI+agent+release",
+            "AI+breakthrough+OR+autonomous+coding+OR+tech+innovation",
+        ]
+        for q in queries:
+            url = f"https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:en"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"})
+            try:
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    xml_data = resp.read()
+                    root = ET.fromstring(xml_data)
+                    for item in root.findall(".//item")[:6]:
+                        raw_title = item.find("title").text if item.find("title") is not None else ""
+                        if not raw_title:
+                            continue
+                        clean_title = re.sub(r" - [^-]+$", "", raw_title).strip()
+                        fit_score, cat = self._score_channel_fit(clean_title)
 
-                    cand = TopicCandidate(
-                        title=clean_title,
-                        source="google_news_india",
-                        source_url=item.find("link").text if item.find("link") is not None else "",
-                        category=cat,
-                        view_count=150000,
-                        virality_score=8.8,
-                        feasibility_score=8.5,
-                        channel_fit_score=fit_score,
-                        metadata={"source_outlet": raw_title.split(" - ")[-1] if " - " in raw_title else "News"},
-                    )
-                    cand.compute_composite()
-                    candidates.append(cand)
-        except Exception as e:
-            log.warning(f"Google News India RSS fetch error: {e}")
+                        cand = TopicCandidate(
+                            title=clean_title,
+                            source="google_news_india",
+                            source_url=item.find("link").text if item.find("link") is not None else "",
+                            category="technology",
+                            view_count=200000,
+                            virality_score=9.0,
+                            feasibility_score=8.5,
+                            channel_fit_score=fit_score,
+                            metadata={"source_outlet": raw_title.split(" - ")[-1] if " - " in raw_title else "News"},
+                        )
+                        cand.compute_composite()
+                        candidates.append(cand)
+            except Exception as e:
+                log.warning(f"Google News India RSS fetch error: {e}")
         return candidates
 
     def discover_live_candidate(self) -> TopicCandidate:

@@ -4,14 +4,16 @@ script_director.py — Transformative Script & Shot Card Director
 
 MANDATES:
   1. STRICT HINGLISH MANDATE: All scripts, voiceovers, and captions MUST be in
-     conversational, punchy Indian Hinglish (e.g., "Bhai, kya aapko pata hai...",
-     "Agar aapka bank account freeze ho gaya to...").
-  2. RAPID PACING: Structured 2.0–2.5 second shot cards (cuts every 2-3s max).
-  3. ANTI-REUSED CONTENT: 100% original transformative commentary (>70% visual replacement).
-  4. DUAL-FORMAT: 1 Long-form (16:9) + 2-3 Vertical Shorts (9:16) with cliffhangers.
-  5. DAY-1 MONETIZATION: Auto-injected tracked affiliate links & pinned comments.
+     conversational, punchy Indian Hinglish.
+  2. STRICT BAN ON GENERIC OPENINGS: Banned phrases like "Namaste dosto", "Welcome back",
+     "Hello guys". Line 1 MUST be a 0–2s curiosity/shock hook.
+  3. DYNAMIC SCENE CUES: Parses live_data["scene_cues"] into ShotCard objects.
+     If LLM fails or returns empty scene_cues, raises an exception (NO hardcoded banking fallbacks).
+  4. NO HARDCODED BANKING TEXT: All titles, hooks, anchors, and cards are dynamically generated.
+  5. ROUTED VIA OMNIROUTE: Reads OMNIROUTE_BASE_URL (default http://localhost:8080/v1) with
+     Groq (api.groq.com) as upstream fallback.
 
-CLI Entrypoints:
+CLI Entrypoint:
     python -m agents.script_director [--dry-run]
 """
 
@@ -39,15 +41,15 @@ MIN_VISUAL_TRANSFORMATION_RATIO = 0.80
 
 AFFILIATE_CATALOG = {
     "finance": [
-        {"title": "Check Your Mule/Fraud Risk Free (Official RBI Portal)", "url": "https://amzn.to/rbi-fraud-check"},
-        {"title": "Zero-Fee Scam Protection App (India)", "url": "https://amzn.to/cyber-shield-app"},
+        {"title": "Zero-Fee Scam & Subscription Tracker (India)", "url": "https://amzn.to/fin-tracker-india"},
+        {"title": "Zero-Fee Index Investing Portal", "url": "https://amzn.to/invest-zero-fee"},
     ],
     "technology": [
         {"title": "Top AI Productivity Extension for Chrome", "url": "https://amzn.to/ai-productivity-tool"},
-        {"title": "Hardware Security Key for Banking", "url": "https://amzn.to/yubikey-india"},
+        {"title": "Best Creator & Developer Productivity Gear", "url": "https://amzn.to/dev-creator-gear"},
     ],
     "general": [
-        {"title": "Almighty Anand Recommended Creator & Tech Gear", "url": "https://amzn.to/anand-stack"},
+        {"title": "Almighty Anand Recommended Creator & Tech Stack", "url": "https://amzn.to/anand-stack"},
     ],
 }
 
@@ -61,6 +63,7 @@ class ShotCard:
     visual_prompt: str
     narration_cue: str
     overlay_text: str
+    badge_text: str = "TRENDING"
     is_original_generated: bool = True
 
 
@@ -94,6 +97,7 @@ class ScriptDirector:
     def __init__(self, dry_run: bool = False):
         self.dry_run = dry_run
         self.memory = MemoryStore()
+        self.omniroute_url = os.environ.get("OMNIROUTE_BASE_URL", "http://localhost:8080/v1")
         self.groq_key = self._load_env_var("GROQ_API_KEY")
 
     @staticmethod
@@ -108,30 +112,54 @@ class ScriptDirector:
         return None
 
     def call_live_llm(self, prompt: str) -> dict:
-        if not self.groq_key:
-            log.warning("No GROQ_API_KEY found, using dynamic Hinglish generator")
-            return {}
+        """
+        Attempts OmniRoute (default http://localhost:8080/v1) first.
+        Falls back to Groq free-tier (openai/gpt-oss-120b) with sub-second JSON response.
+        """
+        system_content = (
+            "You are the Lead Script Director for Almighty Anand (@almightyanand). "
+            "CRITICAL MANDATES:\n"
+            "1. Output high-energy, conversational Indian Hinglish (Roman script).\n"
+            "2. STRICT BAN: NEVER start scripts with 'Namaste dosto', 'Welcome back', 'Hello guys', or 'Hey friends'. "
+            "Line 1 MUST be an immediate 0-2 second shock/curiosity hook (e.g. 'Bhai, is ek feature ne sab kuch badal diya...', "
+            "'Agar aap yeh tool use karte ho to suno...').\n"
+            "3. Generate valid JSON only. You MUST provide at least 6-8 distinct 'scene_cues' tailored specifically to this topic."
+        )
 
-        url = "https://api.groq.com/openai/v1/chat/completions"
         payload = {
             "model": "openai/gpt-oss-120b",
             "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are the Lead Script Director for Almighty Anand (@almightyanand). "
-                        "MANDATE: Output high-energy, conversational Indian Hinglish (Roman script). "
-                        "Never use formal textbook Hindi or pure English. Use natural spoken phrases like "
-                        "'Bhai, kya aapko pata hai...', 'Agar aapka bank account freeze ho gaya to...', "
-                        "'Dhyan se suno'. Every short must have a 2-second hook and cuts every 2-3 seconds. "
-                        "Reply in valid JSON only."
-                    ),
-                },
+                {"role": "system", "content": system_content},
                 {"role": "user", "content": prompt},
             ],
             "response_format": {"type": "json_object"},
             "temperature": 0.7,
         }
+
+        # 1. Try OmniRoute first
+        try:
+            log.info(f"Connecting to OmniRoute at {self.omniroute_url}...")
+            req = urllib.request.Request(
+                f"{self.omniroute_url.rstrip('/')}/chat/completions",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={
+                    "Content-Type": "application/json",
+                    "User-Agent": "AlmightyAnandStudio/1.0",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=4) as resp:
+                data = json.loads(resp.read().decode())
+                content = data["choices"][0]["message"]["content"]
+                log.info("✅ LLM response successfully received via OmniRoute!")
+                return json.loads(content)
+        except Exception as e:
+            log.info(f"OmniRoute not reachable ({e}), falling back to Groq upstream endpoint...")
+
+        # 2. Upstream fallback to Groq
+        if not self.groq_key:
+            raise RuntimeError("GROQ_API_KEY is not configured and OmniRoute is unreachable.")
+
+        url = "https://api.groq.com/openai/v1/chat/completions"
         req = urllib.request.Request(
             url,
             data=json.dumps(payload).encode("utf-8"),
@@ -145,127 +173,127 @@ class ScriptDirector:
             with urllib.request.urlopen(req, timeout=15) as resp:
                 data = json.loads(resp.read().decode())
                 content = data["choices"][0]["message"]["content"]
+                log.info("✅ LLM response successfully received via Groq free tier!")
                 return json.loads(content)
         except Exception as e:
-            log.error(f"Live LLM call error: {e}")
-            return {}
+            log.error(f"Groq API call error: {e}")
+            raise RuntimeError(f"All LLM routing failed: {e}")
 
     def build_transformative_package(
         self,
         topic_data: dict,
         chosen_style: str = "commentary_broll",
     ) -> ProductionScriptPackage:
-        title = topic_data.get("title", "Live Trending Alert")
-        category = topic_data.get("category", "finance")
+        title = topic_data.get("title", "")
+        category = topic_data.get("category", "technology")
+        if not title:
+            raise ValueError("Cannot formulate script: topic title is empty.")
+
         production_id = f"prod_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-
         log.info(f"🎬 Formulating Transformative Hinglish Package for: '{title}'")
-        log.info(f"🎨 Visual Style Preset: '{chosen_style}' | Mandatory Language: Hinglish")
+        log.info(f"🎨 Visual Style Preset: '{chosen_style}' | Category: '{category}'")
 
-        llm_prompt = f"""Write an original transformative Hinglish YouTube script package for Almighty Anand:
+        llm_prompt = f"""Write an original transformative YouTube script package for Almighty Anand:
 TOPIC: {title}
 CATEGORY: {category}
 STYLE: {chosen_style}
 
 Generate valid JSON with:
-"hook_hinglish": High-energy 0-2s hook in conversational Hinglish,
-"long_form_summary_hinglish": 120-word deep-dive breakdown in Hinglish,
-"short_01_hook_hinglish": Punchy 3-second short hook,
-"short_01_script_hinglish": 70-word punchy Hinglish script for a 30s vertical Short,
+"long_form_title": Viral, clickable 16:9 title for this topic (Hinglish/English),
+"hook_hinglish": 0-2s high-energy shock hook (BANNED: 'Namaste', 'Welcome back', 'Hello'),
+"long_form_summary_hinglish": 100-word deep-dive breakdown in punchy Hinglish,
+"short_01_title": Clickable vertical Short title with #Shorts,
+"short_01_hook_hinglish": 0-2s immediate vertical hook,
+"short_01_script_hinglish": 65-80 word high-retention narration script in Hinglish,
 "short_01_suspense_ending": High-curiosity cliffhanger closing line in Hinglish,
-"scene_cues": list of 10 shot descriptions (each 2.5s) with overlay_text and visual_prompt
+"scene_cues": [
+  {{
+    "overlay_text": "2-4 word high-contrast title banner",
+    "badge_text": "1-2 word contextual badge (e.g. AI RELEASE, NEW HACK, WARNING)",
+    "visual_prompt": "Detailed cinematic prompt for AI diffusion or stock B-roll camera angle",
+    "narration_cue": "Spoken sentence corresponding to this scene"
+  }}
+] (Provide exactly 7 to 10 scene cues tailored specifically to {title})
 """
+
         live_data = self.call_live_llm(llm_prompt)
 
-        # Fallback dynamic Hinglish generator if LLM was unavailable
-        clean_kw = re.sub(r"[^\w\s]", "", title).split()[:4]
-        topic_short = " ".join(clean_kw)
+        # STRICT VERIFICATION: Verify scene_cues exist
+        raw_scene_cues = live_data.get("scene_cues")
+        if not raw_scene_cues or not isinstance(raw_scene_cues, list) or len(raw_scene_cues) < 4:
+            raise RuntimeError(
+                f"🚨 LLM returned invalid or empty scene_cues for '{title}'. "
+                "Hardcoded banking fallbacks are banned. Aborting."
+            )
 
-        hook = live_data.get("hook_hinglish") or (
-            f"Bhai, kya aapko pata hai? {topic_short} ko lekar abhi abhi ek massive alert aaya hai!"
-        )
-        body = live_data.get("long_form_summary_hinglish") or (
-            f"Welcome back to Almighty Anand! Agar aap sochte ho ki aapka bank account 100% safe hai, "
-            f"to aap bohot badi galatfehmi mein ho. RBI aur cyber agencies ne naya AI monitoring system "
-            f"activate kar diya hai. Ab bina kisi warning ke suspicious transactions block honge. "
-            f"Aaj ke is breakdown mein jaanenge ki aapko apne phone par kya settings turant badalni hain."
-        )
+        # Build dynamic ShotCard objects from live_data["scene_cues"]
+        shot_cards = []
+        for i, cue in enumerate(raw_scene_cues, 1):
+            overlay = str(cue.get("overlay_text") or f"SHOT {i}").strip()
+            badge = str(cue.get("badge_text") or "ALERT").strip().upper()
+            vis_prompt = str(cue.get("visual_prompt") or f"Cinematic visual representing {title}").strip()
+            narr_cue = str(cue.get("narration_cue") or "").strip()
 
-        short_01_hook = live_data.get("short_01_hook_hinglish") or (
-            f"Bhai, kya aapka account bhi bina bataye freeze ho sakta hai?"
-        )
-        short_01_script = live_data.get("short_01_script_hinglish") or (
-            f"Bhai, kya aapka account bhi bina bataye freeze ho sakta hai? "
-            f"RBI aur cyber cell ne ek naya AI tracking rule chalu kiya hai. "
-            f"Agar aapke account mein kisi third-party se suspicious transfer aaya, "
-            f"to bina kisi notice ke aapka UPI lock ho jayega. "
-            f"Isko bachane ke liye phone mein yeh ek setting turant check karo."
-        )
-        suspense = live_data.get("short_01_suspense_ending") or (
-            "Yeh setting off nahi ki, to agla transfer atak sakta hai. Check pinned comment right now!"
-        )
+            shot_cards.append(asdict(ShotCard(
+                shot_index=i,
+                duration_seconds=3.0,
+                style_preset=chosen_style,
+                camera_angle=f"Angle {i}",
+                visual_prompt=vis_prompt,
+                narration_cue=narr_cue,
+                overlay_text=overlay,
+                badge_text=badge,
+            )))
 
-        # Construct 11 Rapid-Cut Shot Cards (2.5s each for maximum retention)
-        rapid_shot_cards = [
-            asdict(ShotCard(1, 2.5, chosen_style, "Medium Close-up", f"Stylized host Anand looking shocked with phone alert badge: {topic_short}", "Bhai, kya aapka account bhi freeze ho sakta hai?", "ACCOUNT FREEZE RISK?")),
-            asdict(ShotCard(2, 2.5, chosen_style, "Dutch Angle", "Digital bank balance turning into a locked red icon with glowing circuits", "RBI aur cyber cell ne naya AI tracking rule lagaya hai.", "NEW AI MONITORING")),
-            asdict(ShotCard(3, 2.5, chosen_style, "Extreme Close-up", "Close up on smartphone screen showing failed transaction notification", "Agar kisi unknown party se payment aaya to turant alert.", "SUSPICIOUS TRANSFER")),
-            asdict(ShotCard(4, 2.5, chosen_style, "Top-Down Flatlay", "Infographic illustrating mule accounts vs normal user accounts", "Aapka account automatically mule category mein ja sakta hai.", "MULE ACCOUNT TRAP")),
-            asdict(ShotCard(5, 2.5, chosen_style, "Macro Camera Push", "Glowing holographic warning sign with Indian cyber cell logo", "Bina kisi advance SMS ke UPI freeze ho raha hai.", "NO ADVANCE SMS")),
-            asdict(ShotCard(6, 2.5, chosen_style, "Isometric View", "Step 1: Open banking app and tap security tab", "Isko bachane ke liye Step 1: Banking app kholo.", "STEP 1: APP SECURITY")),
-            asdict(ShotCard(7, 2.5, chosen_style, "Screen Zoom", "Step 2: Turn off unverified third-party permissions", "Step 2: Unverified third-party access band karo.", "STEP 2: REVOKE ACCESS")),
-            asdict(ShotCard(8, 2.5, chosen_style, "Side Angle", "Step 3: Enable two-factor biometric verification", "Step 3: Biometric security on karo.", "STEP 3: BIOMETRIC LOCK")),
-            asdict(ShotCard(9, 2.5, chosen_style, "Wide Cinematic", "Host Anand pointing forward with calm confident expression", "Yeh 30 seconds aapko lakhon ke loss se bacha sakte hain.", "SAVE YOUR MONEY")),
-            asdict(ShotCard(10, 2.5, chosen_style, "Low Angle Rim Light", "Character warning sign with dark background and amber rim lights", "Agar yeh nahi kiya, to agla payment atak sakta hai.", "CHECK PINNED COMMENT")),
-            asdict(ShotCard(11, 2.5, chosen_style, "Frontal CTA", "Official Almighty Anand subscribe badge and pinned comment pointer", "Full safety guide pinned comment mein hai. Abhi subscribe karo!", "SUBSCRIBE FOR HACKS")),
-        ]
+        # Dynamic Script Content
+        long_title = live_data.get("long_form_title") or f"{title}: The Real Truth Exposed"
+        long_body = live_data.get("long_form_summary_hinglish") or live_data.get("hook_hinglish", "")
+        
+        short_title = live_data.get("short_01_title") or f"{title[:45]} #Shorts"
+        short_hook = live_data.get("short_01_hook_hinglish") or shot_cards[0]["narration_cue"]
+        short_script = live_data.get("short_01_script_hinglish")
+        if not short_script:
+            raise RuntimeError(f"🚨 LLM failed to generate 'short_01_script_hinglish' for '{title}'.")
 
-        # 1. 16:9 Long-Form Script
+        # Enforce Ban on generic openings
+        banned_openings = ["namaste", "welcome back", "hello guys", "hey guys", "hello friends"]
+        for b in banned_openings:
+            if short_script.lower().startswith(b):
+                short_script = re.sub(r"^" + re.escape(b) + r"[\s,\.\!]*", "", short_script, flags=re.IGNORECASE).strip()
+                short_script = short_script[0].upper() + short_script[1:]
+
+        suspense = live_data.get("short_01_suspense_ending") or "Check the pinned comment right now before it's too late!"
+
         long_form = {
-            "title": f"{title}: Kya Hai Naya AI Rule? (Full Truth Exposed)",
+            "title": long_title,
             "format": "16:9",
             "target_duration_minutes": 8,
-            "hook_hinglish": hook,
-            "retention_anchors": {
-                "0:30": "The New AI Mule Detection System",
-                "2:45": "Why Normal Users Are Getting Trapped",
-                "5:15": "The 3 Critical Security Settings to Change",
-                "7:00": "How to Unfreeze Your UPI in 24 Hours",
-            },
-            "script_body_hinglish": body,
-            "shot_cards": rapid_shot_cards[:4],
+            "hook_hinglish": short_hook,
+            "script_body_hinglish": long_body,
+            "shot_cards": shot_cards[:4],
         }
 
-        # 2. Dual-Format Shorts (9:16)
         shorts = [
             asdict(ShortVariant(
                 variant_id=f"{production_id}_short_01",
-                title=f"Kya aapka bank account freeze ho sakta hai? #Shorts",
-                duration_seconds=27.5,
-                hook_hinglish=short_01_hook,
+                title=short_title,
+                duration_seconds=round(len(shot_cards) * 3.0, 1),
+                hook_hinglish=short_hook,
                 suspense_ending_hinglish=suspense,
-                narration_script_hinglish=short_01_script,
-                shot_cards=rapid_shot_cards,
-            )),
-            asdict(ShortVariant(
-                variant_id=f"{production_id}_short_02",
-                title=f"RBI New Cyber Rule 2026: Don't Do This #Shorts",
-                duration_seconds=28.0,
-                hook_hinglish="Bhai, RBI ne chupke se ek naya rule pass kar diya hai.",
-                suspense_ending_hinglish="Apne dosto ko yeh video abhi share karo!",
-                narration_script_hinglish="RBI ne sabhi banks ko AI monitoring mandate diya hai. Agar aap P2P transfer karte ho, to yeh 2 galti bilkul mat karna.",
-            )),
+                narration_script_hinglish=short_script,
+                shot_cards=shot_cards,
+            ))
         ]
 
-        # 3. Monetization: Tracked Affiliate Links & Pinned Comment
+        # Monetization: Tracked Affiliate Links & Pinned Comment
         affiliates = AFFILIATE_CATALOG.get(category, AFFILIATE_CATALOG["general"])
         affiliate_lines = "\n".join([f"🔗 {item['title']}: {item['url']}" for item in affiliates])
+        clean_title_snippet = re.sub(r"[^\w\s]", "", title)[:40]
 
-        clean_topic_title = re.sub(r"[^\w\s]", "", title)
         pinned_comment = (
-            f"🚨 IMPORTANT UPDATE ({clean_topic_title[:35]}):\n\n"
-            f"📌 Recommended tools to protect your bank & UPI:\n{affiliate_lines}\n\n"
-            f"💬 Kya aapko bhi koi suspicious payment alert aaya hai? Comment mein batao, main direct reply karunga!"
+            f"⚡ UPDATE: {clean_title_snippet}\n\n"
+            f"📌 Recommended tools & resources:\n{affiliate_lines}\n\n"
+            f"💬 Is topic par aapka kya opinion hai? Comment mein batao, let's discuss!"
         )
 
         package = ProductionScriptPackage(
@@ -280,13 +308,13 @@ Generate valid JSON with:
             pinned_comment=pinned_comment,
         )
 
-        # Record in memory store
+        # Record topic in SQLite memory store
         self.memory.record_topic(
             title=title,
             source=topic_data.get("source", "trend_scout"),
             source_url=topic_data.get("source_url", ""),
             category=category,
-            angle="cyber_security_breakdown",
+            angle="transformative_commentary",
             visual_style=chosen_style,
             status="scripted",
         )
@@ -296,14 +324,14 @@ Generate valid JSON with:
 
 def main():
     parser = argparse.ArgumentParser(description="ScriptDirector Agent")
-    parser.add_argument("--dry-run", action="store_true", help="Run without external API calls")
+    parser.add_argument("--dry-run", action="store_true", help="Run in dry run mode")
     args = parser.parse_args()
 
     director = ScriptDirector(dry_run=args.dry_run)
     sample_topic = {
-        "title": "I4C signs MoU with RBI Innovation Hub to use AI for detecting mule accounts, tackling cyber fraud",
-        "category": "finance",
-        "source": "google_news_india",
+        "title": "Microsoft Unveils Code Red AI Infrastructure Upgrade 2026",
+        "category": "technology",
+        "source": "google_trends_india",
     }
     pkg = director.build_transformative_package(sample_topic)
     print("\n--- ScriptDirector Transformative Package ---")
