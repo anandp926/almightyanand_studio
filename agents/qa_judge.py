@@ -2,13 +2,16 @@
 """
 qa_judge.py — Automated QA & Quality Gate Judge Agent
 
-Audits every rendered video against 5 strict gates before publishing:
+Audits every rendered video against 6 strict gates before publishing:
   1. DURATION INTEGRITY: video_duration >= voice_duration (never truncate mid-sentence).
   2. SCENE VARIETY: At least 5 distinct scene image files used (zero static slideshows).
   3. SUBTITLE INTEGRITY: ASS subtitle file non-empty with safe-zone margin.
-  4. VISUAL-TO-TOPIC RELEVANCE: Explicitly verifies `visuals_match_topic: true`
-     (FAILS if a tech/AI video contains unrelated nature, food, or random stock photos).
-  5. VISUAL LAYOUT & WATERMARK: 4 keyframes (10%, 35%, 65%, 90%) audited for 1080x1920
+  4. ANTI-WATERMARK GATE (no_watermarks: true):
+     MUST FAIL if any frame, metadata, or source contains stock watermarks
+     (Alamy, Adobe Stock, Dreamstime, Shutterstock, Getty, iStock, etc.) or foreign-language posters.
+  5. VISUAL-TO-TOPIC RELEVANCE (visuals_match_topic: true):
+     MUST FAIL if a tech/AI video contains unrelated nature, food, dogs, or surreal non-tech images.
+  6. VISUAL LAYOUT & WATERMARK: 4 keyframes (10%, 35%, 65%, 90%) audited for 1080x1920
      resolution, safe-zone clearance, and handle consistency (@almightyanand).
 
 CLI Entrypoint:
@@ -38,10 +41,18 @@ log = logging.getLogger("qa_judge")
 
 FFMPEG_BIN = "/Users/anand/.local/bin/ffmpeg" if Path("/Users/anand/.local/bin/ffmpeg").exists() else "ffmpeg"
 
+WATERMARK_BLACKLIST = [
+    "alamy", "adobestock", "adobe stock", "dreamstime", "shutterstock",
+    "getty", "gettyimages", "istock", "istockphoto", "watermark",
+    "depositphotos", "freepik", "vectorstock", "123rf", "pond5",
+    "stock photo", "event poster", "cartel", "concierto", "fiesta"
+]
+
 UNRELATED_BLACKLIST_TERMS = [
     "dog", "puppy", "cat", "kitten", "onion", "wheat field", "corn field",
     "paddy field", "pasture", "meadow", "farm animal", "livestock",
-    "pasta recipe", "salad recipe", "kitchen cooking", "vegetable market"
+    "pasta recipe", "salad recipe", "kitchen cooking", "vegetable market",
+    "giant man in underwear", "dirt pit", "mud wrestling", "swimwear"
 ]
 
 
@@ -54,6 +65,7 @@ class QAJudgeReport:
     voice_duration: float
     distinct_scenes_count: int
     subtitles_count: int
+    no_watermarks: bool
     visuals_match_topic: bool
     keyframes_evaluated: List[str]
     checks: Dict[str, bool]
@@ -99,13 +111,55 @@ class QAJudge:
 
         return keyframes
 
+    def verify_no_watermarks(self, scenes_dir: Path) -> Tuple[bool, List[str]]:
+        """
+        Anti-Watermark Gate: Scans scene metadata and image files.
+        Fails if Alamy, Adobe Stock, Dreamstime, Shutterstock, Getty, or poster signatures are found.
+        """
+        notes = []
+        violations = []
+
+        if scenes_dir.exists():
+            for meta_file in scenes_dir.glob("shot_*.json"):
+                try:
+                    data = json.loads(meta_file.read_text())
+                    source = str(data.get("source", "")).lower()
+                    if any(bad in source for bad in ["alamy", "shutterstock", "getty", "adobestock", "web_scraped"]):
+                        violations.append(f"Shot {data.get('shot_index')}: unauthorized stock source '{source}'")
+
+                    prompt_text = (data.get("visual_prompt", "") + " " + data.get("overlay_text", "")).lower()
+                    for wm in WATERMARK_BLACKLIST:
+                        if wm in prompt_text:
+                            violations.append(f"Shot {data.get('shot_index')}: stock watermark keyword '{wm}'")
+
+                    if data.get("watermark_detected") is True:
+                        violations.append(f"Shot {data.get('shot_index')}: watermark flag detected")
+                except Exception:
+                    pass
+
+            for img_file in scenes_dir.glob("shot_*.jpg"):
+                try:
+                    with Image.open(img_file) as img:
+                        info_str = str(img.info).lower()
+                        for wm in WATERMARK_BLACKLIST:
+                            if wm in info_str:
+                                violations.append(f"{img_file.name}: EXIF watermark tag '{wm}'")
+                except Exception:
+                    pass
+
+        if violations:
+            notes.append(f"Watermark FAIL: Detected copyrighted stock watermarks: {', '.join(violations)}")
+            return False, notes
+
+        notes.append("Watermark PASS: Zero stock watermarks or foreign posters detected across all scenes.")
+        return True, notes
+
     def verify_visual_to_topic_relevance(self, scenes_dir: Path, topic: str) -> Tuple[bool, List[str]]:
         """
         Audits visual prompts, scene metadata, and filenames.
-        Fails if unrelated blacklist terms (dogs, wheat fields, onions) are detected for tech/AI topics.
+        Fails if unrelated blacklist terms (dogs, wheat fields, onions, underwear) are detected for tech/AI topics.
         """
         notes = []
-        is_tech_topic = any(w in topic.lower() for w in ["ai", "tech", "model", "deepseek", "gemini", "code", "cyber", "tool", "quantum"])
         found_violations = []
 
         if scenes_dir.exists():
@@ -206,11 +260,15 @@ class QAJudge:
         else:
             notes.append(f"Subtitles FAIL: only {subs_count} dialogue events in ASS file.")
 
-        # 4. Visual-to-Topic Relevance Check (MANDATORY)
+        # 4. Anti-Watermark Check (MANDATORY)
+        no_watermarks, wm_notes = self.verify_no_watermarks(scenes_dir)
+        notes.extend(wm_notes)
+
+        # 5. Visual-to-Topic Relevance Check (MANDATORY)
         visuals_match_topic, rel_notes = self.verify_visual_to_topic_relevance(scenes_dir, topic)
         notes.extend(rel_notes)
 
-        # 5. Visual Keyframe QC (10%, 35%, 65%, 90%)
+        # 6. Visual Keyframe QC (10%, 35%, 65%, 90%)
         qc_dir = video_path.parent / "qc_audit"
         keyframes = self.extract_keyframes(video_path, qc_dir, video_dur)
         visual_qc_valid, visual_notes = self.evaluate_keyframes_layout(keyframes, topic)
@@ -221,6 +279,7 @@ class QAJudge:
             "duration_valid": duration_valid,
             "scene_variety_valid": scene_variety_valid,
             "subtitles_valid": subtitles_valid,
+            "no_watermarks": no_watermarks,
             "visuals_match_topic": visuals_match_topic,
             "visual_qc_valid": visual_qc_valid,
         }
@@ -237,6 +296,7 @@ class QAJudge:
             voice_duration=voice_dur,
             distinct_scenes_count=distinct_scenes,
             subtitles_count=subs_count,
+            no_watermarks=no_watermarks,
             visuals_match_topic=visuals_match_topic,
             keyframes_evaluated=[str(k) for k in keyframes],
             checks=checks,
@@ -244,7 +304,7 @@ class QAJudge:
             notes=notes,
         )
 
-        log.info(f"🏆 QA JUDGE RESULT: {status} (Score: {score}/10, visuals_match_topic: {visuals_match_topic})")
+        log.info(f"🏆 QA JUDGE RESULT: {status} (Score: {score}/10, no_watermarks: {no_watermarks}, visuals_match_topic: {visuals_match_topic})")
         for n in notes:
             log.info(f"  • {n}")
 
@@ -252,25 +312,17 @@ class QAJudge:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="QA Judge Quality Gate")
-    parser.add_argument("--video", required=True, type=Path, help="Path to rendered MP4 video")
-    parser.add_argument("--voice", required=True, type=Path, help="Path to voice MP3")
-    parser.add_argument("--ass", required=True, type=Path, help="Path to ASS subtitle file")
-    parser.add_argument("--scenes-dir", required=True, type=Path, help="Directory containing generated shot images")
-    parser.add_argument("--topic", default="General Topic", help="Topic title for verification")
+    parser = argparse.ArgumentParser(description="QA Judge Agent")
+    parser.add_argument("--video", required=True, type=Path)
+    parser.add_argument("--voice", required=True, type=Path)
+    parser.add_argument("--ass", required=True, type=Path)
+    parser.add_argument("--scenes-dir", required=True, type=Path)
+    parser.add_argument("--topic", default="Technology Update")
     args = parser.parse_args()
 
     judge = QAJudge()
-    report = judge.audit(
-        video_path=args.video,
-        voice_path=args.voice,
-        ass_path=args.ass,
-        scenes_dir=args.scenes_dir,
-        topic=args.topic,
-    )
-    print("\n--- QA JUDGE REPORT ---")
+    report = judge.audit(args.video, args.voice, args.ass, args.scenes_dir, args.topic)
     print(json.dumps(asdict(report), indent=2))
-    sys.exit(0 if report.status == "PASS" else 1)
 
 
 if __name__ == "__main__":

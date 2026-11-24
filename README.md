@@ -90,21 +90,49 @@ Rev: $0            Rev: ~$15–$30     Rev: ~$80–$120    Rev: ~$200–$300    
 
 ---
 
-## 🚀 Local CLI Testing & Autonomous Commands
+## 🚀 24/7 Autonomous Daemon & GCP Production Deployment
+
+### 1. Single Command GCP VM Deployment (100% Autonomous 24/7 Stack)
+Run this single command on your GCP CPU VM (`e2-medium`) to clone the repository, boot all background services (`OmniRoute`, `FreeLLMAPI`, `Redis`), and launch the self-healing production orchestrator:
 
 ```bash
-# 1. Run the master autonomous CEO planner (Discovers live fresh trend & plans daily package)
-python3 -m agents.ceo_planner --run-today
+git clone https://github.com/anandp926/almightyanand_studio.git ~/almightyanand_studio && \
+cd ~/almightyanand_studio && \
+cp .env.example .env && \
+docker compose up -d --build && \
+echo "✅ Almighty Anand Studio 24/7 autonomous stack is live!"
+```
 
-# 2. Plan + Render a verified vertical Short (1080x1920, Hinglish, safe-zone captions)
+---
+
+### 2. Autonomous 24/7 Daily Schedule (IST)
+
+The daemon runs continuously with `restart: unless-stopped` self-healing:
+
+| Time (IST) | Agent Action | Autonomous Output |
+| :--- | :--- | :--- |
+| **06:00 IST** | `TrendScout` + `CEOPlanner` | Scrapes live India/Global trends; verifies against `memory/published_topics.db` to guarantee 100% fresh topics. |
+| **07:00 IST** | `ScriptDirector` + `MediaDispatcher` + `EditorFFmpeg` | Formulates fact-checked Hinglish script package, generates 100% AI/royalty-free visuals (Pollinations FLUX / Open-Gen-AI / Pexels), renders vertical Short with zoompan & safe-zone captions, and executes `QAJudge` (auto-retries up to 2x on watermark/relevance failure). |
+| **12:00 IST** | `Publisher` | Releases **Lunch Peak** vertical Short with tracked affiliate links & pinned comments. |
+| **18:00 IST** | `Publisher` | Releases **Commute Peak** long-form (16:9) deep dive. |
+| **21:00 IST** | `Publisher` | Releases **Prime Time** Short #2 / Hindi Twin Dubbed release. |
+| **23:30 IST** | `AnalyticsReviewer` | Audits view duration, CTR & retention metrics; updates tomorrow's prompt weights and records budget burn. |
+
+---
+
+### 3. CLI Commands & Local Testing
+
+```bash
+# 1. Run 1 live production cycle immediately (generates video + runs QA Judge)
+python3 -m agents.orchestrator --run-once
+
+# 2. Run the 24/7 self-healing scheduler daemon
+python3 -m agents.orchestrator --daemon
+
+# 3. Test OmniRoute endpoints
+curl http://localhost:8080/health
+curl http://localhost:8080/v1/models
+
+# 4. Plan and render today's short manually
 python3 -m agents.ceo_planner --render-short
-
-# 3. Test individual agents locally
-python3 -m agents.trend_scout --dry-run
-python3 -m agents.script_director --dry-run
-python3 -m agents.editor_ffmpeg --dry-run
-python3 -m agents.analytics_reviewer --dry-run
-
-# 4. Run the complete 6-stage autonomous production cycle
-python3 -m agents.orchestrator --dry-run
 ```

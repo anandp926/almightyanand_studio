@@ -27,6 +27,9 @@ services:
     restart: unless-stopped
     ports:
       - "8081:8081"
+    volumes:
+      - ./services:/app/services:ro
+      - ./.env:/app/.env:ro
     environment:
       - PORT=8081
       - REDIS_URL=redis://redis:6379/1
@@ -38,22 +41,8 @@ services:
       redis:
         condition: service_healthy
     command: >
-      bash -c "pip install --no-cache-dir fastapi uvicorn httpx redis &&
-               python -c '
-      from fastapi import FastAPI, HTTPException
-      import os, httpx, uvicorn
-      app = FastAPI(title=\"FreeLLMAPI Aggregator\")
-      @app.get(\"/health\")
-      def health(): return {\"status\": \"ok\", \"service\": \"freellmapi\"}
-      @app.post(\"/v1/chat/completions\")
-      async def chat(req: dict):
-          # Route to free tier Google Gemini or Groq
-          key = os.environ.get(\"GOOGLE_API_KEY\")
-          if key:
-              return {\"choices\": [{\"message\": {\"content\": \"FreeLLMAPI response via Gemini free tier\"}}]}
-          return {\"choices\": [{\"message\": {\"content\": \"Mock free tier response\"}}]}
-      uvicorn.run(app, host=\"0.0.0.0\", port=8081)
-      '"
+      bash -c "pip install --no-cache-dir fastapi uvicorn &&
+               python /app/services/freellm_server.py"
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/health')"]
       interval: 30s
@@ -69,8 +58,10 @@ services:
     ports:
       - "8080:8080"
     volumes:
+      - ./services:/app/services:ro
       - ./configs/omniroute_config.json:/app/config.json:ro
       - ./skills:/app/skills:ro
+      - ./.env:/app/.env:ro
     environment:
       - PORT=8080
       - OMNIROUTE_CONFIG=/app/config.json
@@ -85,39 +76,31 @@ services:
       freellm:
         condition: service_healthy
     command: >
-      bash -c "pip install --no-cache-dir fastapi uvicorn httpx redis litellm &&
-               python -c '
-      from fastapi import FastAPI, Request
-      import os, json, httpx, uvicorn
-      app = FastAPI(title=\"OmniRoute Gateway\")
-      config = json.load(open(os.environ.get(\"OMNIROUTE_CONFIG\", \"/app/config.json\")))
-      @app.get(\"/health\")
-      def health(): return {\"status\": \"healthy\", \"router\": \"OmniRoute\", \"token_compression\": True}
-      @app.post(\"/v1/chat/completions\")
-      async def completions(request: Request):
-          body = await request.json()
-          # Fallback chain: Free Gemini -> Free Groq -> Upstream FreeLLMAPI -> Paid fallback
-          return {\"id\": \"omniroute-1\", \"choices\": [{\"message\": {\"content\": json.dumps({\"status\": \"success\"})}}]}
-      uvicorn.run(app, host=\"0.0.0.0\", port=8080)
-      '"
+      bash -c "pip install --no-cache-dir fastapi uvicorn &&
+               python /app/services/omniroute_server.py"
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
       interval: 30s
       timeout: 5s
       retries: 3
 
-  # ── Orchestrator: Multi-Agent Pipeline Runner ───────────────────
+  # ── Orchestrator: Multi-Agent Pipeline Runner & 24/7 Daemon ─────
   orchestrator:
     image: python:3.12-slim
     restart: unless-stopped
     volumes:
       - ./agents:/app/agents:ro
+      - ./infra:/app/infra:ro
       - ./configs:/app/configs:ro
       - ./skills:/app/skills:ro
+      - ./assets:/app/assets:ro
       - ./data:/app/data
+      - ./renders:/app/renders
+      - ./memory:/app/memory
+      - ./.env:/app/.env:ro
     environment:
       - REDIS_URL=redis://redis:6379/0
-      - OMNIROUTE_URL=http://omniroute:8080
+      - OMNIROUTE_BASE_URL=http://omniroute:8080/v1
       - FREELLM_URL=http://freellm:8081
       - GPU_CONTROLLER_ENABLED=${GPU_CONTROLLER_ENABLED:-false}
       - YOUTUBE_CHANNEL_ID_EN=${YOUTUBE_CHANNEL_ID_EN:-}
@@ -128,8 +111,9 @@ services:
       omniroute:
         condition: service_healthy
     command: >
-      bash -c "pip install --no-cache-dir redis httpx pyyaml schedule &&
-               python -m agents.trend_scout --dry-run"
+      bash -c "apt-get update && apt-get install -y ffmpeg &&
+               pip install --no-cache-dir redis httpx pyyaml schedule pillow edge-tts &&
+               python -m agents.orchestrator --daemon"
 
 volumes:
   redis_data:

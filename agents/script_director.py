@@ -117,13 +117,17 @@ class ScriptDirector:
         Falls back to Groq free-tier (openai/gpt-oss-120b) with sub-second JSON response.
         """
         system_content = (
-            "You are the Lead Script Director for Almighty Anand (@almightyanand). "
+            "You are the Lead Script Director for Almighty Anand (@almightyanand).\n"
             "CRITICAL MANDATES:\n"
             "1. Output high-energy, conversational Indian Hinglish (Roman script).\n"
             "2. STRICT BAN: NEVER start scripts with 'Namaste dosto', 'Welcome back', 'Hello guys', or 'Hey friends'. "
             "Line 1 MUST be an immediate 0-2 second shock/curiosity hook (e.g. 'Bhai, is ek feature ne sab kuch badal diya...', "
             "'Agar aap yeh tool use karte ho to suno...').\n"
-            "3. Generate valid JSON only. You MUST provide at least 6-8 distinct 'scene_cues' tailored specifically to this topic."
+            "3. STRICT FACT-CHECK MANDATE: You MUST only state verified, true facts from the source topic. "
+            "NEVER hallucinate or invent technical specifications, context window sizes, parameter counts, pricing, or benchmarks. "
+            "(For example, NEVER invent fictional claims like '1 TB context window' or impossible specs). "
+            "If specific numbers are not verified in the topic data, speak strictly to verified architectural features or general capabilities without fabricating numbers.\n"
+            "4. Generate valid JSON only. You MUST provide at least 6-8 distinct 'scene_cues' tailored specifically to this topic."
         )
 
         payload = {
@@ -136,26 +140,37 @@ class ScriptDirector:
             "temperature": 0.7,
         }
 
-        # 1. Try OmniRoute first
-        try:
-            log.info(f"Connecting to OmniRoute at {self.omniroute_url}...")
-            req = urllib.request.Request(
-                f"{self.omniroute_url.rstrip('/')}/chat/completions",
-                data=json.dumps(payload).encode("utf-8"),
-                headers={
-                    "Content-Type": "application/json",
-                    "User-Agent": "AlmightyAnandStudio/1.0",
-                },
-            )
-            with urllib.request.urlopen(req, timeout=4) as resp:
-                data = json.loads(resp.read().decode())
-                content = data["choices"][0]["message"]["content"]
-                log.info("✅ LLM response successfully received via OmniRoute!")
-                return json.loads(content)
-        except Exception as e:
-            log.info(f"OmniRoute not reachable ({e}), falling back to Groq upstream endpoint...")
+        # 1. Try OmniRoute first with exponential backoff on 429/transient errors
+        for attempt in range(1, 4):
+            try:
+                log.info(f"Connecting to OmniRoute at {self.omniroute_url} (attempt {attempt})...")
+                req = urllib.request.Request(
+                    f"{self.omniroute_url.rstrip('/')}/chat/completions",
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={
+                        "Content-Type": "application/json",
+                        "User-Agent": "AlmightyAnandStudio/1.0",
+                    },
+                )
+                with urllib.request.urlopen(req, timeout=12) as resp:
+                    data = json.loads(resp.read().decode())
+                    content = data["choices"][0]["message"]["content"]
+                    log.info("✅ LLM response successfully received via OmniRoute!")
+                    return json.loads(content)
+            except urllib.error.HTTPError as he:
+                if he.code == 429:
+                    wait_time = (2 ** attempt) * 1.5
+                    log.warning(f"OmniRoute 429 Rate Limit hit. Backing off {wait_time:.1f}s...")
+                    import time
+                    time.sleep(wait_time)
+                else:
+                    log.info(f"OmniRoute returned HTTP {he.code}: {he.reason}, attempting fallback...")
+                    break
+            except Exception as e:
+                log.info(f"OmniRoute attempt {attempt} failed ({e}), falling back...")
+                break
 
-        # 2. Upstream fallback to Groq with automatic retry
+        # 2. Upstream fallback to Groq with automatic retry & backoff
         if not self.groq_key:
             raise RuntimeError("GROQ_API_KEY is not configured and OmniRoute is unreachable.")
 
@@ -169,16 +184,26 @@ class ScriptDirector:
                 "User-Agent": "AlmightyAnandStudio/1.0",
             },
         )
-        for attempt in range(1, 3):
+        for attempt in range(1, 4):
             try:
                 with urllib.request.urlopen(req, timeout=15) as resp:
                     data = json.loads(resp.read().decode())
                     content = data["choices"][0]["message"]["content"]
                     log.info("✅ LLM response successfully received via Groq free tier!")
                     return json.loads(content)
+            except urllib.error.HTTPError as he:
+                if he.code == 429:
+                    wait_time = (2 ** attempt) * 1.5
+                    log.warning(f"Groq 429 Rate Limit. Backing off {wait_time:.1f}s...")
+                    import time
+                    time.sleep(wait_time)
+                else:
+                    log.warning(f"Groq API call attempt {attempt} failed: {he}")
+                    if attempt == 3:
+                        raise RuntimeError(f"All LLM routing failed: {he}")
             except Exception as e:
                 log.warning(f"Groq API call attempt {attempt} failed: {e}")
-                if attempt == 2:
+                if attempt == 3:
                     raise RuntimeError(f"All LLM routing failed: {e}")
                 import time
                 time.sleep(1.5)
@@ -201,6 +226,11 @@ class ScriptDirector:
 TOPIC: {title}
 CATEGORY: {category}
 STYLE: {chosen_style}
+
+CRITICAL FACT-CHECK MANDATE:
+- ONLY state verified facts about {title}.
+- NEVER hallucinate or invent technical specifications, context window sizes (e.g. do NOT invent '1 TB context window'), parameter counts, or fake benchmarks.
+- If specific numbers are not verified, frame capabilities accurately in general terms.
 
 Generate valid JSON with:
 "long_form_title": Viral, clickable 16:9 title for this topic (Hinglish/English),
