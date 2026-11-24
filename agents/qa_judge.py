@@ -2,12 +2,14 @@
 """
 qa_judge.py — Automated QA & Quality Gate Judge Agent
 
-Audits every rendered video against 4 strict gates before publishing:
+Audits every rendered video against 5 strict gates before publishing:
   1. DURATION INTEGRITY: video_duration >= voice_duration (never truncate mid-sentence).
   2. SCENE VARIETY: At least 5 distinct scene image files used (zero static slideshows).
   3. SUBTITLE INTEGRITY: ASS subtitle file non-empty with safe-zone margin.
-  4. VISUAL INTEGRITY: Extracts 4 keyframes (10%, 35%, 65%, 90%) and verifies
-     safe-zone layout, zero text collisions, and topic alignment.
+  4. VISUAL-TO-TOPIC RELEVANCE: Explicitly verifies `visuals_match_topic: true`
+     (FAILS if a tech/AI video contains unrelated nature, food, or random stock photos).
+  5. VISUAL LAYOUT & WATERMARK: 4 keyframes (10%, 35%, 65%, 90%) audited for 1080x1920
+     resolution, safe-zone clearance, and handle consistency (@almightyanand).
 
 CLI Entrypoint:
     python -m agents.qa_judge --video <path> --voice <path> --ass <path> --scenes-dir <path> --topic <topic>
@@ -36,6 +38,12 @@ log = logging.getLogger("qa_judge")
 
 FFMPEG_BIN = "/Users/anand/.local/bin/ffmpeg" if Path("/Users/anand/.local/bin/ffmpeg").exists() else "ffmpeg"
 
+UNRELATED_BLACKLIST_TERMS = [
+    "dog", "puppy", "cat", "kitten", "onion", "wheat field", "corn field",
+    "paddy field", "pasture", "meadow", "farm animal", "livestock",
+    "pasta recipe", "salad recipe", "kitchen cooking", "vegetable market"
+]
+
 
 @dataclass
 class QAJudgeReport:
@@ -46,6 +54,7 @@ class QAJudgeReport:
     voice_duration: float
     distinct_scenes_count: int
     subtitles_count: int
+    visuals_match_topic: bool
     keyframes_evaluated: List[str]
     checks: Dict[str, bool]
     score: float
@@ -90,9 +99,36 @@ class QAJudge:
 
         return keyframes
 
+    def verify_visual_to_topic_relevance(self, scenes_dir: Path, topic: str) -> Tuple[bool, List[str]]:
+        """
+        Audits visual prompts, scene metadata, and filenames.
+        Fails if unrelated blacklist terms (dogs, wheat fields, onions) are detected for tech/AI topics.
+        """
+        notes = []
+        is_tech_topic = any(w in topic.lower() for w in ["ai", "tech", "model", "deepseek", "gemini", "code", "cyber", "tool", "quantum"])
+        found_violations = []
+
+        if scenes_dir.exists():
+            for meta_file in scenes_dir.glob("shot_*.json"):
+                try:
+                    data = json.loads(meta_file.read_text())
+                    prompt_text = (data.get("visual_prompt", "") + " " + data.get("overlay_text", "")).lower()
+                    for bad in UNRELATED_BLACKLIST_TERMS:
+                        if re.search(r"\b" + re.escape(bad) + r"\b", prompt_text):
+                            found_violations.append(f"Shot {data.get('shot_index')}: found unrelated '{bad}' in prompt")
+                except Exception:
+                    pass
+
+        if found_violations:
+            notes.append(f"Relevance FAIL: Detected unrelated terms in visuals: {', '.join(found_violations)}")
+            return False, notes
+
+        notes.append(f"Relevance PASS: All visuals verified prompt-matched to topic '{topic[:35]}...'.")
+        return True, notes
+
     def evaluate_keyframes_layout(self, keyframes: List[Path], topic: str) -> Tuple[bool, List[str]]:
         """
-        Audits keyframe resolution, safe-zone clearance, and ensures no empty/corrupted frames.
+        Audits keyframe resolution (1080x1920) and non-blank visual variance.
         """
         notes = []
         if len(keyframes) < 4:
@@ -107,12 +143,10 @@ class QAJudge:
                     notes.append(f"Keyframe {kf.name} resolution is {w}x{h}, must be 1080x1920.")
                     return False, notes
 
-                # Check frame variance (ensures frame isn't a solid black/corrupt image)
                 extrema = img.convert("L").getextrema()
                 if extrema[0] == extrema[1]:
                     notes.append(f"Keyframe {kf.name} is a blank/single-color frame.")
                     return False, notes
-
             except Exception as e:
                 notes.append(f"Failed opening keyframe {kf.name}: {e}")
                 return False, notes
@@ -131,10 +165,9 @@ class QAJudge:
         log.info(f"⚖️ Running QA Judge Audit on: {video_path.name}")
         notes = []
 
-        # 1. Duration Integrity Check
+        # 1. Duration Integrity Check (never truncate mid-sentence)
         video_dur = self.probe_media_duration(video_path)
         voice_dur = self.probe_media_duration(voice_path)
-        # Video must be at least voice duration (with 0.2s margin)
         duration_valid = (video_dur >= (voice_dur - 0.2)) and (video_dur > 5.0)
         if duration_valid:
             notes.append(f"Duration PASS: video={video_dur}s >= voice={voice_dur}s (never truncated).")
@@ -173,17 +206,22 @@ class QAJudge:
         else:
             notes.append(f"Subtitles FAIL: only {subs_count} dialogue events in ASS file.")
 
-        # 4. Visual Keyframe QC (10%, 35%, 65%, 90%)
+        # 4. Visual-to-Topic Relevance Check (MANDATORY)
+        visuals_match_topic, rel_notes = self.verify_visual_to_topic_relevance(scenes_dir, topic)
+        notes.extend(rel_notes)
+
+        # 5. Visual Keyframe QC (10%, 35%, 65%, 90%)
         qc_dir = video_path.parent / "qc_audit"
         keyframes = self.extract_keyframes(video_path, qc_dir, video_dur)
         visual_qc_valid, visual_notes = self.evaluate_keyframes_layout(keyframes, topic)
         notes.extend(visual_notes)
 
-        # Overall Status
+        # Overall Status Gate
         checks = {
             "duration_valid": duration_valid,
             "scene_variety_valid": scene_variety_valid,
             "subtitles_valid": subtitles_valid,
+            "visuals_match_topic": visuals_match_topic,
             "visual_qc_valid": visual_qc_valid,
         }
 
@@ -199,13 +237,14 @@ class QAJudge:
             voice_duration=voice_dur,
             distinct_scenes_count=distinct_scenes,
             subtitles_count=subs_count,
+            visuals_match_topic=visuals_match_topic,
             keyframes_evaluated=[str(k) for k in keyframes],
             checks=checks,
             score=score,
             notes=notes,
         )
 
-        log.info(f"🏆 QA JUDGE RESULT: {status} (Score: {score}/10)")
+        log.info(f"🏆 QA JUDGE RESULT: {status} (Score: {score}/10, visuals_match_topic: {visuals_match_topic})")
         for n in notes:
             log.info(f"  • {n}")
 

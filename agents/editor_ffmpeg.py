@@ -256,7 +256,7 @@ class EditorFFmpeg:
             badge_width = min(420, max(200, len(badge_text) * 18 + 50))
             draw.rectangle([70, 130, 70 + badge_width, 195], fill=(20, 24, 38), outline=accent, width=2)
             draw.text((95, 145), badge_text, font=font_badge, fill=accent)
-            draw.text((70 + badge_width + 30, 148), "@thealmightyanand", font=font_badge, fill=(226, 232, 240))
+            draw.text((70 + badge_width + 30, 148), "@almightyanand", font=font_badge, fill=(226, 232, 240))
 
             # 4. Top Headline Overlay Banner (y: 220 - 320)
             draw.text((72, 222), overlay_text, font=font_header, fill=(0, 0, 0))  # drop shadow

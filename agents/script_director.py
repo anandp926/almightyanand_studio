@@ -155,7 +155,7 @@ class ScriptDirector:
         except Exception as e:
             log.info(f"OmniRoute not reachable ({e}), falling back to Groq upstream endpoint...")
 
-        # 2. Upstream fallback to Groq
+        # 2. Upstream fallback to Groq with automatic retry
         if not self.groq_key:
             raise RuntimeError("GROQ_API_KEY is not configured and OmniRoute is unreachable.")
 
@@ -169,15 +169,19 @@ class ScriptDirector:
                 "User-Agent": "AlmightyAnandStudio/1.0",
             },
         )
-        try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                data = json.loads(resp.read().decode())
-                content = data["choices"][0]["message"]["content"]
-                log.info("✅ LLM response successfully received via Groq free tier!")
-                return json.loads(content)
-        except Exception as e:
-            log.error(f"Groq API call error: {e}")
-            raise RuntimeError(f"All LLM routing failed: {e}")
+        for attempt in range(1, 3):
+            try:
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    data = json.loads(resp.read().decode())
+                    content = data["choices"][0]["message"]["content"]
+                    log.info("✅ LLM response successfully received via Groq free tier!")
+                    return json.loads(content)
+            except Exception as e:
+                log.warning(f"Groq API call attempt {attempt} failed: {e}")
+                if attempt == 2:
+                    raise RuntimeError(f"All LLM routing failed: {e}")
+                import time
+                time.sleep(1.5)
 
     def build_transformative_package(
         self,
