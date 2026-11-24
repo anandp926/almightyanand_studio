@@ -371,6 +371,15 @@ class EditorFFmpeg:
             topic=script_data.get("title", "Almighty Anand Short"),
         )
 
+        if qa_report.status != "PASS":
+            rejected_dir = RENDERS_DIR / "rejected"
+            rejected_dir.mkdir(parents=True, exist_ok=True)
+            rejected_path = rejected_dir / target_mp4.name
+            target_mp4.rename(rejected_path)
+            qa_report.video_path = str(rejected_path)
+            log.error(f"🚫 QA FAILED — moved render to {rejected_path}")
+            return rejected_path, qa_report
+
         return target_mp4, qa_report
 
 

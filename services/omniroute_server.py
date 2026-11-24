@@ -135,7 +135,12 @@ async def _call_gemini(messages: list, response_format: Optional[dict] = None) -
     sys_parts = []
     user_parts = []
     for m in messages:
-        c = compress_tokens(m.get("content", ""))
+        c = m.get("content", "")
+        if isinstance(c, str):
+            c = compress_tokens(c)
+        elif isinstance(c, list):
+            text_items = [item.get("text", "") for item in c if isinstance(item, dict) and item.get("type") == "text"]
+            c = compress_tokens(" ".join(text_items))
         if m.get("role") == "system":
             sys_parts.append(c)
         else:
@@ -189,9 +194,16 @@ async def _call_groq(messages: list, response_format: Optional[dict] = None) -> 
     # Compress user content
     compressed_messages = []
     for m in messages:
+        c = m.get("content", "")
+        if isinstance(c, str):
+            c = compress_tokens(c)
+        elif isinstance(c, list):
+            # Extract text elements if Groq text model
+            text_items = [item.get("text", "") for item in c if isinstance(item, dict) and item.get("type") == "text"]
+            c = compress_tokens(" ".join(text_items)) if text_items else str(c)
         compressed_messages.append({
             "role": m.get("role", "user"),
-            "content": compress_tokens(m.get("content", "")),
+            "content": c,
         })
 
     url = "https://api.groq.com/openai/v1/chat/completions"
