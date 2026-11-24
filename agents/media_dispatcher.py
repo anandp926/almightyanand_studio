@@ -75,6 +75,7 @@ class MediaDispatcher:
         self.gpu_enabled = os.environ.get("GPU_CONTROLLER_ENABLED", "false").lower() == "true"
         self.opengenai_url = os.environ.get("OPENGENAI_URL", "http://10.160.0.3:8091")
         self.hf_token = self._load_env_var("HF_TOKEN") or ""
+        self.pollinations_key = self._load_env_var("POLLINATIONS_API_KEY") or ""
         self.pexels_key = self._load_env_var("PEXELS_API_KEY") or ""
 
     @staticmethod
@@ -117,27 +118,32 @@ class MediaDispatcher:
         words = clean_p.split()[:14]
         full_prompt = f"{' '.join(words)}, {STYLE_SUFFIX}"
         encoded_p = urllib.parse.quote(full_prompt)
-        url = (
-            f"https://image.pollinations.ai/prompt/{encoded_p}"
-            f"?width=1080&height=1920&model=flux&nologo=true&seed={seed}"
-        )
 
-        backoffs = [5, 10, 20]
-        for attempt, wait_s in enumerate(backoffs, 1):
-            try:
-                req = urllib.request.Request(
-                    url,
-                    headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"},
-                )
-                with urllib.request.urlopen(req, timeout=30) as resp:
-                    data = resp.read()
-                    if len(data) > 30_000:
-                        return data
-                    log.warning(f"Pollinations returned small payload ({len(data)} bytes) on attempt {attempt}")
-            except Exception as e:
-                log.warning(f"Pollinations attempt {attempt} failed: {e}")
-            if attempt < len(backoffs):
-                time.sleep(wait_s)
+        endpoints = [
+            f"https://gen.pollinations.ai/image/{encoded_p}?width=1080&height=1920&model=flux&nologo=true&seed={seed}",
+            f"https://image.pollinations.ai/prompt/{encoded_p}?width=1080&height=1920&model=flux&nologo=true&seed={seed}",
+        ]
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+        }
+        if self.pollinations_key:
+            headers["Authorization"] = f"Bearer {self.pollinations_key}"
+
+        backoffs = [3, 7, 15]
+        for url in endpoints:
+            for attempt, wait_s in enumerate(backoffs, 1):
+                try:
+                    req = urllib.request.Request(url, headers=headers)
+                    with urllib.request.urlopen(req, timeout=30) as resp:
+                        data = resp.read()
+                        if len(data) > 30_000:
+                            return data
+                        log.warning(f"Pollinations returned small payload ({len(data)} bytes) on attempt {attempt}")
+                except Exception as e:
+                    log.warning(f"Pollinations attempt {attempt} failed on {url.split('?')[0]}: {e}")
+                if attempt < len(backoffs):
+                    time.sleep(wait_s)
         return None
 
     def _generate_flux_huggingface(self, prompt: str) -> Optional[bytes]:

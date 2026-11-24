@@ -73,7 +73,7 @@ def list_models():
     """Returns OpenAI-compatible model registry with active free-tier fallback chains."""
     models = [
         {
-            "id": "gemini-2.0-flash",
+            "id": "gemini-flash-lite-latest",
             "object": "model",
             "created": 1700000000,
             "owned_by": "google",
@@ -147,7 +147,7 @@ async def _call_gemini(messages: list, response_format: Optional[dict] = None) -
             user_parts.append(f"{m.get('role').upper()}: {c}")
 
     full_prompt = "\n\n".join(sys_parts + user_parts)
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GOOGLE_API_KEY}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key={GOOGLE_API_KEY}"
     payload = {
         "contents": [{"parts": [{"text": full_prompt}]}],
         "generationConfig": {"temperature": 0.7, "maxOutputTokens": 4096},
