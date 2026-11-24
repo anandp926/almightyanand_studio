@@ -143,23 +143,15 @@ class MediaDispatcher:
     def _generate_flux_huggingface(self, prompt: str) -> Optional[bytes]:
         if not self.hf_token:
             return None
-        url = "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell"
-        payload = {"inputs": f"{prompt}, {STYLE_SUFFIX}"}
         try:
-            req = urllib.request.Request(
-                url,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={
-                    "Authorization": f"Bearer {self.hf_token}",
-                    "Content-Type": "application/json",
-                },
-            )
-            with urllib.request.urlopen(req, timeout=35) as resp:
-                data = resp.read()
-                if len(data) > 30_000:
-                    return data
+            from huggingface_hub import InferenceClient
+            client = InferenceClient(api_key=self.hf_token)
+            img = client.text_to_image(f"{prompt}, {STYLE_SUFFIX}", model="black-forest-labs/FLUX.1-schnell")
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG")
+            return buf.getvalue()
         except Exception as e:
-            log.warning(f"HuggingFace FLUX fallback failed: {e}")
+            log.debug(f"HuggingFace FLUX fallback skipped: {e}")
         return None
 
     def _fetch_pexels_royalty_free(self, query: str) -> Optional[bytes]:
