@@ -20,6 +20,10 @@ CLI Entrypoint:
 """
 script_director.py — Transformative Script & Shot Card Director
 """
+#!/usr/bin/env python3
+"""
+script_director.py — Transformative Script & Shot Card Director
+"""
 
 import argparse
 import json
@@ -43,6 +47,7 @@ logging.basicConfig(
 log = logging.getLogger("script_director")
 
 MIN_VISUAL_TRANSFORMATION_RATIO = 0.80
+STUDIO_ROOT = Path(__file__).resolve().parent.parent
 
 AFFILIATE_CATALOG = {
     "finance": [
@@ -69,6 +74,7 @@ class ShotCard:
     narration_cue: str
     overlay_text: str
     badge_text: str = "TRENDING"
+    speaker: str = "narrator"
     is_original_generated: bool = True
 
 
@@ -77,6 +83,7 @@ class ShortVariant:
     variant_id: str
     title: str
     duration_seconds: float
+    category: str = "technology"
     aspect_ratio: str = "9:16"
     hook_hinglish: str = ""
     suspense_ending_hinglish: str = ""
@@ -109,12 +116,22 @@ class ScriptDirector:
     def _load_env_var(var_name: str) -> Optional[str]:
         if os.environ.get(var_name):
             return os.environ[var_name]
-        env_file = Path(__file__).resolve().parent.parent / ".env"
+        env_file = STUDIO_ROOT / ".env"
         if env_file.exists():
             for line in env_file.read_text().splitlines():
                 if line.startswith(f"{var_name}="):
                     return line.split("=", 1)[1].strip()
         return None
+
+    @staticmethod
+    def _load_playbook() -> dict:
+        pb_path = STUDIO_ROOT / "configs" / "viral_playbook.json"
+        if pb_path.exists():
+            try:
+                return json.loads(pb_path.read_text(encoding="utf-8"))
+            except Exception as e:
+                log.warning(f"Failed to load viral_playbook.json: {e}")
+        return {"pillars": {}, "character_voices": {}}
 
     def call_live_llm(self, prompt: str) -> dict:
         system_content = (
@@ -228,14 +245,31 @@ class ScriptDirector:
         if not title:
             raise ValueError("Cannot formulate script: topic title is empty.")
 
+        # Load viral playbook priors (hooks + multi-character speaker voices)
+        pb = self._load_playbook()
+        pillar_cfg = pb.get("pillars", {}).get(category, pb.get("pillars", {}).get("technology", {}))
+        default_speaker = pillar_cfg.get("default_speaker", "narrator")
+        top_hooks = [
+            h["pattern"]
+            for h in sorted(pillar_cfg.get("hook_priors", []), key=lambda x: x.get("weight", 1.0), reverse=True)[:3]
+        ]
+        allowed_speakers = list(pb.get("character_voices", {}).keys()) or ["narrator"]
+        hook_examples_str = "\n".join(f"  - {h}" for h in top_hooks) if top_hooks else "  - Wait... kya aapne yeh naya update dekha?"
+
         production_id = f"prod_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
         log.info(f"🎬 Formulating Transformative Hinglish Package for: '{title}'")
-        log.info(f"🎨 Visual Style Preset: '{chosen_style}' | Category: '{category}'")
+        log.info(f"🎨 Visual Style Preset: '{chosen_style}' | Category: '{category}' | Default Speaker: '{default_speaker}'")
 
         llm_prompt = f"""Write an original transformative YouTube script package for Almighty Anand:
 TOPIC: {title}
 CATEGORY: {category}
 STYLE: {chosen_style}
+
+PROVEN HIGH-RETENTION HOOK STRUCTURES FOR THIS PILLAR (adapt the style, don't copy verbatim):
+{hook_examples_str}
+
+ALLOWED CHARACTER SPEAKERS: {allowed_speakers}
+DEFAULT SPEAKER: {default_speaker}
 
 STRICT RULES:
 - ONLY state verified facts about {title}. Never invent specs or numbers.
@@ -244,6 +278,7 @@ STRICT RULES:
 - Keep sentences 6-10 words max with '...' pauses for natural spoken-word TTS delivery.
 - End with a strong curiosity CTA/question for comments.
 - Order scene_cues strictly 1-to-1 with the narration flow. Never request text, logos, signs, or UI screens in visual_prompt.
+- For each scene_cue, assign 'speaker' from {allowed_speakers}. Switch speakers (e.g., 'skeptic_friend', 'tech_expert', 'mythic_hero', 'villain_heavy') whenever there is dialogue or a contrasting question; otherwise use '{default_speaker}'.
 
 Generate valid JSON with:
 "long_form_title": Clickable 16:9 title (Hinglish/English),
@@ -257,6 +292,7 @@ Generate valid JSON with:
   {{
     "overlay_text": "2-4 word punchy title banner",
     "badge_text": "1-2 word contextual badge (e.g. AI SHIFT, ALERT, BREAKTHROUGH)",
+    "speaker": "Speaker ID from {allowed_speakers}",
     "visual_prompt": "Cinematic physical scene, objects, lighting, and characters ONLY (no text, no signs, no charts)",
     "narration_cue": "Exact sentence from short_01_script_hinglish corresponding to this cut"
   }}
@@ -277,6 +313,9 @@ Generate valid JSON with:
             badge = str(cue.get("badge_text") or "UPDATE").strip().upper()
             vis_prompt = str(cue.get("visual_prompt") or f"Cinematic futuristic scene for {title}").strip()
             narr_cue = str(cue.get("narration_cue") or "").strip()
+            speaker = str(cue.get("speaker") or default_speaker).strip()
+            if speaker not in allowed_speakers:
+                speaker = default_speaker
 
             shot_cards.append(asdict(ShotCard(
                 shot_index=i,
@@ -287,6 +326,7 @@ Generate valid JSON with:
                 narration_cue=narr_cue,
                 overlay_text=overlay,
                 badge_text=badge,
+                speaker=speaker,
             )))
 
         long_title = live_data.get("long_form_title") or f"{title}: Real Impact Explained"
@@ -321,6 +361,7 @@ Generate valid JSON with:
                 variant_id=f"{production_id}_short_01",
                 title=short_title,
                 duration_seconds=round(len(shot_cards) * 3.5, 1),
+                category=category,
                 hook_hinglish=short_hook,
                 suspense_ending_hinglish=suspense,
                 narration_script_hinglish=short_script,

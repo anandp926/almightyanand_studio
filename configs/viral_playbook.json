@@ -1,0 +1,44 @@
+{
+    "pillars": {
+      "finance": {
+        "default_speaker": "narrator_urgent",
+        "bgm_volume": 0.12,
+        "hook_cut_seconds": 2.0,
+        "hook_priors": [
+          {"pattern": "Agar aap UPI ya bank app use karte ho, to 30 second ruko...", "weight": 1.2},
+          {"pattern": "Aapke account se bina OTP paise kat sakte hain... par kaise?", "weight": 1.1},
+          {"pattern": "RBI ka naya rule aa gaya hai, aur 90% log yeh galti kar rahe hain!", "weight": 1.0}
+        ]
+      },
+      "technology": {
+        "default_speaker": "narrator",
+        "bgm_volume": 0.10,
+        "hook_cut_seconds": 2.2,
+        "hook_priors": [
+          {"pattern": "Bhai, is ek free AI tool ne 5 ghante ka kaam 2 minute mein kar diya...", "weight": 1.2},
+          {"pattern": "Google ka naya update aaya hai... aur ab purane tools bekaar ho gaye!", "weight": 1.1},
+          {"pattern": "Wait... kya aap abhi bhi yeh kaam manually kar rahe ho?", "weight": 1.0}
+        ]
+      },
+      "mythic": {
+        "default_speaker": "narrator_deep",
+        "bgm_volume": 0.15,
+        "hook_cut_seconds": 2.5,
+        "hook_priors": [
+          {"pattern": "Kya aapko pata hai... Bali ke paas aisa kaunsa vardaan tha jo use ajey banata tha?", "weight": 1.2},
+          {"pattern": "Jab Hanuman ji ne apna asli roop dikhaya... to poora Lanka kaanp utha!", "weight": 1.1}
+        ]
+      }
+    },
+    "character_voices": {
+      "narrator":        {"voice": "hi-IN-MadhurNeural",  "rate": "+8%",  "pitch": "+2Hz"},
+      "narrator_urgent": {"voice": "hi-IN-MadhurNeural",  "rate": "+11%", "pitch": "+3Hz"},
+      "narrator_deep":   {"voice": "hi-IN-MadhurNeural",  "rate": "+2%",  "pitch": "-4Hz"},
+      "tech_expert":     {"voice": "en-IN-PrabhatNeural", "rate": "+7%",  "pitch": "+0Hz"},
+      "female_host":     {"voice": "hi-IN-SwaraNeural",   "rate": "+8%",  "pitch": "+2Hz"},
+      "female_tech":     {"voice": "en-IN-NeerjaNeural",  "rate": "+7%",  "pitch": "+1Hz"},
+      "mythic_hero":     {"voice": "hi-IN-MadhurNeural",  "rate": "+0%",  "pitch": "-6Hz"},
+      "villain_heavy":   {"voice": "en-IN-PrabhatNeural", "rate": "-4%",  "pitch": "-10Hz"},
+      "skeptic_friend":  {"voice": "hi-IN-MadhurNeural",  "rate": "+12%", "pitch": "+5Hz"}
+    }
+  }

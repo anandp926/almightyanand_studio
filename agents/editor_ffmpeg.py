@@ -115,83 +115,100 @@ class EditorFFmpeg:
             reels_h265_paths=[str(RENDERS_DIR / f"{production_id}_reel_01.mp4")],
             audio_loudness_lufs=-16.0,
         )
+    
+    @staticmethod
+    def _load_playbook() -> dict:
+        pb_path = STUDIO_ROOT / "configs" / "viral_playbook.json"
+        if pb_path.exists():
+            return json.loads(pb_path.read_text(encoding="utf-8"))
+        return {"pillars": {}, "character_voices": {}}
 
     async def generate_voice_and_subtitles(
         self,
         script_text: str,
         output_audio_path: Path,
         output_ass_path: Path,
-        voice: str = "hi-IN-MadhurNeural",
+        shot_cards: Optional[List[dict]] = None,
+        category: str = "technology",
     ) -> Tuple[float, List[Tuple[float, float, str]]]:
-        """Synthesizes voice via Edge-TTS and outputs native ASS safe-zone subtitles."""
+        """Synthesizes single or multi-character Hinglish voice via Edge-TTS + viral_playbook.json."""
         import edge_tts
 
-        clean_script = sanitize_text_for_render(script_text)
-        log.info(f"🎙 Generating Edge-TTS Hinglish Voice ({voice})...")
-        # communicate = edge_tts.Communicate(clean_script, voice)
-        tts_script = re.sub(r"\s*-\s*", "... ", clean_script)
-        communicate = edge_tts.Communicate(
-            tts_script,
-            voice=voice,
-            rate="+8%",     # Faster, natural creator cadence (try +6% to +10%)
-            pitch="+2Hz",   # Slightly more energetic, less flat
-        )
-        raw_events = []
-        with open(output_audio_path, "wb") as audio_file:
-            async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
-                    audio_file.write(chunk["data"])
-                elif chunk["type"] == "SentenceBoundary":
-                    start_s = chunk["offset"] / 10_000_000.0
-                    dur_s = chunk["duration"] / 10_000_000.0
-                    end_s = start_s + dur_s
-                    raw_events.append((start_s, end_s, chunk["text"].strip()))
+        playbook = self._load_playbook()
+        pillar = playbook.get("pillars", {}).get(category, {})
+        voices_map = playbook.get("character_voices", {})
+        default_speaker = pillar.get("default_speaker", "narrator")
 
-        # Split sentences into 4-6 word micro-cues for high-retention rapid pacing
+        # Build (speaker, text) segments from shot_cards if narration_cues exist; else single narration
+        segments = []
+        if shot_cards and any(c.get("narration_cue") for c in shot_cards):
+            for card in shot_cards:
+                cue = sanitize_text_for_render(card.get("narration_cue", ""))
+                if cue:
+                    speaker = card.get("speaker") or default_speaker
+                    segments.append((speaker, cue))
+        if not segments:
+            segments = [(default_speaker, sanitize_text_for_render(script_text))]
+
+        tmp_audio_dir = output_audio_path.parent / "voice_chunks"
+        tmp_audio_dir.mkdir(parents=True, exist_ok=True)
+        chunk_paths = []
         micro_cues = []
-        for start_s, end_s, text in raw_events:
-            clean_line = sanitize_text_for_render(text)
-            words = clean_line.split()
-            if len(words) <= 6:
-                micro_cues.append((start_s, end_s, clean_line))
-            else:
-                chunk_size = 5
-                total_dur = end_s - start_s
-                sub_chunks = [words[i:i + chunk_size] for i in range(0, len(words), chunk_size)]
-                time_per_chunk = total_dur / len(sub_chunks)
-                for idx, c in enumerate(sub_chunks):
-                    c_start = start_s + (idx * time_per_chunk)
-                    c_end = c_start + time_per_chunk
-                    micro_cues.append((c_start, c_end, " ".join(c)))
+        cursor_s = 0.0
 
-        # Native ASS Subtitle format (Safe-Zone y=78%-81%, MarginV=360, Fontsize=52)
+        for idx, (speaker, line_text) in enumerate(segments):
+            v_cfg = voices_map.get(speaker, {"voice": "hi-IN-MadhurNeural", "rate": "+8%", "pitch": "+2Hz"})
+            tts_text = re.sub(r"\s*-\s*", "... ", line_text)
+            chunk_mp3 = tmp_audio_dir / f"seg_{idx:02d}.mp3"
+
+            communicate = edge_tts.Communicate(
+                tts_text,
+                voice=v_cfg["voice"],
+                rate=v_cfg["rate"],
+                pitch=v_cfg["pitch"],
+            )
+            with open(chunk_mp3, "wb") as f:
+                async for chunk in communicate.stream():
+                    if chunk["type"] == "audio":
+                        f.write(chunk["data"])
+
+            seg_dur = self.qa_judge.probe_media_duration(chunk_mp3)
+            chunk_paths.append(chunk_mp3)
+
+            # Split line into 4-5 word ASS micro-cues aligned to this segment's exact duration
+            words = line_text.split()
+            sub_chunks = [words[i:i + 5] for i in range(0, len(words), 5)] or [words]
+            per_chunk = seg_dur / len(sub_chunks)
+            for j, c in enumerate(sub_chunks):
+                micro_cues.append((cursor_s + j * per_chunk, cursor_s + (j + 1) * per_chunk, " ".join(c)))
+            cursor_s += seg_dur
+
+        # Stitch all character audio segments into one seamless voice.mp3
+        concat_txt = tmp_audio_dir / "voice_concat.txt"
+        concat_txt.write_text("\n".join(f"file '{p.resolve()}'" for p in chunk_paths), encoding="utf-8")
+        subprocess.run(
+            [FFMPEG_BIN, "-y", "-f", "concat", "-safe", "0", "-i", str(concat_txt),
+             "-c:a", "libmp3lame", "-q:a", "2", str(output_audio_path)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True,
+        )
+
         ass_header = (
-            "[Script Info]\n"
-            "ScriptType: v4.00+\n"
-            "PlayResX: 1080\n"
-            "PlayResY: 1920\n"
-            "ScaledBorderAndShadow: yes\n\n"
-            "[V4+ Styles]\n"
-            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
+            "[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nScaledBorderAndShadow: yes\n\n"
+            "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
             "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, "
             "Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
             "Style: Default,Arial,52,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,4,2,2,80,80,360,1\n\n"
-            "[Events]\n"
-            "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+            "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
         )
-
         with open(output_ass_path, "w", encoding="utf-8") as f:
             f.write(ass_header)
             for start, end, text in micro_cues:
-                start_str = self._format_ass_timestamp(start)
-                end_str = self._format_ass_timestamp(end)
-                f.write(f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,{text}\n")
+                f.write(f"Dialogue: 0,{self._format_ass_timestamp(start)},{self._format_ass_timestamp(end)},Default,,0,0,0,,{text}\n")
 
-        # Measure voice duration accurately
         voice_duration = self.qa_judge.probe_media_duration(output_audio_path)
-        log.info(f"✅ Voice generated: {output_audio_path.name} ({voice_duration:.2f}s) with {len(micro_cues)} ASS cues")
+        log.info(f"✅ Multi-character voice generated ({len(segments)} segments, {voice_duration:.2f}s)")
         return voice_duration, micro_cues
-
+    
     @staticmethod
     def _format_ass_timestamp(seconds: float) -> str:
         cs = int((seconds - int(seconds)) * 100)
@@ -317,7 +334,13 @@ class EditorFFmpeg:
 
         # 1. Synthesize Voice & Captions
         voice_duration, _ = asyncio.run(
-            self.generate_voice_and_subtitles(narration, voice_audio, ass_file)
+            self.generate_voice_and_subtitles(
+                narration,
+                voice_audio,
+                ass_file,
+                shot_cards=shot_cards,
+                category=script_data.get("category", "technology"),
+            )
         )
         # Enforce rule: video_duration = voice_duration + 0.5s
         target_duration = round(voice_duration + 0.5, 2)
