@@ -87,11 +87,12 @@ services:
   # ── Orchestrator: Multi-Agent Pipeline Runner & 24/7 Daemon ─────
   orchestrator:
     image: python:3.12-slim
+    working_dir: /app
     restart: unless-stopped
     volumes:
       - ./agents:/app/agents:ro
       - ./infra:/app/infra:ro
-      - ./configs:/app/configs:ro
+      - ./configs:/app/configs          # Writable for YouTube OAuth token refresh
       - ./skills:/app/skills:ro
       - ./assets:/app/assets:ro
       - ./data:/app/data
@@ -99,20 +100,22 @@ services:
       - ./memory:/app/memory
       - ./.env:/app/.env:ro
     environment:
+      - TZ=Asia/Kolkata
       - REDIS_URL=redis://redis:6379/0
       - OMNIROUTE_BASE_URL=http://omniroute:8080/v1
       - FREELLM_URL=http://freellm:8081
       - GPU_CONTROLLER_ENABLED=${GPU_CONTROLLER_ENABLED:-false}
       - YOUTUBE_CHANNEL_ID_EN=${YOUTUBE_CHANNEL_ID_EN:-}
-      - AUTO_PUBLISH=${AUTO_PUBLISH:-false}
+      - YOUTUBE_PRIVACY_STATUS=${YOUTUBE_PRIVACY_STATUS:-public}
+      - AUTO_PUBLISH=${AUTO_PUBLISH:-true}
     depends_on:
       redis:
         condition: service_healthy
       omniroute:
         condition: service_healthy
     command: >
-      bash -c "apt-get update && apt-get install -y ffmpeg &&
-               pip install --no-cache-dir redis httpx pyyaml schedule pillow edge-tts &&
+      bash -c "apt-get update && apt-get install -y --no-install-recommends ffmpeg fonts-liberation tzdata &&
+               pip install --no-cache-dir redis httpx pyyaml schedule pillow edge-tts google-api-python-client google-auth-oauthlib &&
                python -m agents.orchestrator --daemon"
 
 volumes:

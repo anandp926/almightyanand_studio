@@ -54,7 +54,15 @@ RENDERS_DIR = STUDIO_ROOT / "renders"
 RENDERS_DIR.mkdir(parents=True, exist_ok=True)
 
 FFMPEG_BIN = "/Users/anand/.local/bin/ffmpeg" if Path("/Users/anand/.local/bin/ffmpeg").exists() else "ffmpeg"
-FONT_PATH = "/System/Library/Fonts/Helvetica.ttc" if Path("/System/Library/Fonts/Helvetica.ttc").exists() else "/System/Library/Fonts/Supplemental/Arial.ttf"
+FONT_PATH = next(
+    (p for p in [
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    ] if Path(p).exists()),
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+)
 
 
 @dataclass

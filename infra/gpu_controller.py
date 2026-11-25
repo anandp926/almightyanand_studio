@@ -88,6 +88,16 @@ class GPUController:
         self.state = ControllerState()
         self._running = True
         self._load_state()
+        try:
+            if self._get_vm_status() == "RUNNING":
+                self.state.vm_running = True
+                if not self.state.session_start:
+                    self.state.session_start = datetime.now(timezone.utc)
+                if not self.state.last_activity:
+                    self.state.last_activity = datetime.now(timezone.utc)
+                log.info("Detected already-running GPU VM on startup; initialized safety timers.")
+        except Exception as e:
+            log.warning(f"Could not inspect initial GPU VM status: {e}")
         signal.signal(signal.SIGTERM, self._shutdown)
         signal.signal(signal.SIGINT, self._shutdown)
 
