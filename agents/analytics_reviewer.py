@@ -32,6 +32,7 @@ class DailyReviewReport:
     active_style: str
     pivot_triggered: bool
     pivot_reason: str
+    playbook_update: dict = field(default_factory=dict)
     generated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
@@ -58,6 +59,52 @@ class AnalyticsReviewer:
                 "SELECT chosen_style FROM daily_plans ORDER BY date DESC LIMIT 1"
             ).fetchone()
             return row["chosen_style"] if row and row["chosen_style"] else "commentary_broll"
+
+    def update_playbook_weights(self, category: str, avg_avd: float, latest_hook: str = "") -> dict:
+        """Mutates configs/viral_playbook.json nightly based on real YouTube AVD."""
+        pb_path = STUDIO_ROOT / "configs" / "viral_playbook.json"
+        if not pb_path.exists():
+            return {"updated": False, "reason": "viral_playbook.json not found"}
+
+        pb = json.loads(pb_path.read_text(encoding="utf-8"))
+        pillar = pb.get("pillars", {}).get(category)
+        if not pillar:
+            return {"updated": False, "reason": f"unknown category '{category}'"}
+
+        changes = []
+
+        # 1. Promote winning hooks (>75% AVD) or decay underperforming priors (<65% AVD)
+        priors = pillar.get("hook_priors", [])
+        if avg_avd >= 75.0:
+            for h in priors:
+                h["weight"] = round(min(2.0, h.get("weight", 1.0) * 1.05), 2)
+            if latest_hook and not any(h["pattern"] == latest_hook for h in priors):
+                priors.append({"pattern": latest_hook, "weight": 1.5})
+                changes.append("promoted_winning_hook")
+        elif avg_avd < 65.0:
+            for h in priors:
+                h["weight"] = round(max(0.3, h.get("weight", 1.0) * 0.85), 2)
+            changes.append("decayed_hook_weights")
+
+        # Keep top 8 highest-weighted hooks so the file stays clean
+        pillar["hook_priors"] = sorted(priors, key=lambda x: x.get("weight", 1.0), reverse=True)[:8]
+
+        # 2. Tune hook cut speed & narrator voice rate on low retention
+        if avg_avd < 65.0:
+            cur_cut = float(pillar.get("hook_cut_seconds", 2.2))
+            pillar["hook_cut_seconds"] = round(max(1.5, cur_cut - 0.2), 2)
+
+            speaker_id = pillar.get("default_speaker", "narrator")
+            voice_cfg = pb.get("character_voices", {}).get(speaker_id)
+            if voice_cfg:
+                cur_rate = int(str(voice_cfg.get("rate", "+8%")).replace("%", "").replace("+", ""))
+                new_rate = min(14, cur_rate + 2)
+                voice_cfg["rate"] = f"+{new_rate}%" if new_rate >= 0 else f"{new_rate}%"
+                changes.append(f"tuned_{speaker_id}_rate_to_{voice_cfg['rate']}")
+
+        pb_path.write_text(json.dumps(pb, indent=2, ensure_ascii=False), encoding="utf-8")
+        log.info(f"🧠 Playbook mutated for '{category}' (AVD={avg_avd}%): {changes or ['no_change']}")
+        return {"updated": True, "changes": changes}
 
     def run_daily_review(self) -> DailyReviewReport:
         if self.dry_run:
@@ -115,6 +162,14 @@ class AnalyticsReviewer:
         if pivot_needed:
             log.warning(f"🔄 SELF-LEARNING PIVOT: {pivot_reason} -> Next style: {next_style}")
 
+        # Mutate configs/viral_playbook.json based on latest category & AVD
+        with self.memory._get_connection() as conn:
+            latest = conn.execute(
+                "SELECT category, title FROM published_topics ORDER BY created_at DESC LIMIT 1"
+            ).fetchone()
+        latest_cat = latest["category"] if latest and latest["category"] else "technology"
+        playbook_update = self.update_playbook_weights(category=latest_cat, avg_avd=avg_avd)
+
         return DailyReviewReport(
             date=today_str,
             channel_name="Almighty Anand",
@@ -124,6 +179,7 @@ class AnalyticsReviewer:
             active_style=active_style,
             pivot_triggered=pivot_needed,
             pivot_reason=pivot_reason,
+            playbook_update=playbook_update,
         )
 
     def review_dry_run(self) -> DailyReviewReport:
@@ -136,6 +192,7 @@ class AnalyticsReviewer:
             active_style="commentary_broll",
             pivot_triggered=False,
             pivot_reason="Dry-run mode.",
+            playbook_update={"updated": False, "reason": "dry_run"},
         )
 
 
