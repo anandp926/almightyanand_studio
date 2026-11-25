@@ -127,7 +127,15 @@ class ScriptDirector:
             "NEVER hallucinate or invent technical specifications, context window sizes, parameter counts, pricing, or benchmarks. "
             "(For example, NEVER invent fictional claims like '1 TB context window' or impossible specs). "
             "If specific numbers are not verified in the topic data, speak strictly to verified architectural features or general capabilities without fabricating numbers.\n"
-            "4. Generate valid JSON only. You MUST provide at least 6-8 distinct 'scene_cues' tailored specifically to this topic."
+            "4. HUMANIZED SPOKEN-WORD PACING (CRITICAL FOR VOICEOVER):\n"
+            "   - Write for the EAR, not for reading. Keep every sentence short (6 to 10 words max).\n"
+            "   - Use natural Indian spoken connectors: 'Suno...', 'Dekho,', 'Matlab,', 'Wait...', 'Aur sabse badi baat?'.\n"
+            "   - Use '...' for dramatic 0.5s pauses before a reveal, and '?' / '!' for vocal inflection.\n"
+            "   - Break complex ideas into punchy Q&A rhythm (e.g., 'Iska fayda kya hai? Simple. Aapka 2 ghante ka kaam... 2 minute mein.').\n"
+            "   - Avoid tongue-twister English jargon back-to-back; mix simple spoken Hindi words between tech terms.\n"
+            "5. CLEAN VISUAL PROMPTS (NO AI GIBBERISH TEXT): In every 'visual_prompt', describe ONLY physical objects, scenes, characters, lighting, and abstract symbols. "
+            "NEVER request text, signs, flowcharts, documents, dashboards, or UI screens.\n"
+            "6. Generate valid JSON only. You MUST provide at least 6-8 distinct 'scene_cues' ordered strictly 1-to-1 with the narration sentences."
         )
 
         payload = {

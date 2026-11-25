@@ -128,8 +128,14 @@ class EditorFFmpeg:
 
         clean_script = sanitize_text_for_render(script_text)
         log.info(f"🎙 Generating Edge-TTS Hinglish Voice ({voice})...")
-        communicate = edge_tts.Communicate(clean_script, voice)
-
+        # communicate = edge_tts.Communicate(clean_script, voice)
+        tts_script = re.sub(r"\s*-\s*", "... ", clean_script)
+        communicate = edge_tts.Communicate(
+            tts_script,
+            voice=voice,
+            rate="+8%",     # Faster, natural creator cadence (try +6% to +10%)
+            pitch="+2Hz",   # Slightly more energetic, less flat
+        )
         raw_events = []
         with open(output_audio_path, "wb") as audio_file:
             async for chunk in communicate.stream():
