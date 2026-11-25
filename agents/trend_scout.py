@@ -9,18 +9,26 @@ Scores candidates by virality × production feasibility × channel fit.
 CLI Entrypoint:
     python -m agents.trend_scout [--dry-run] [--live]
 """
+#!/usr/bin/env python3
+"""
+trend_scout.py — Trending Topic Discovery Agent
+Scrapes LIVE trending topics via Google Trends India and Google News India.
+Filters out corporate PR/interview promos and deduplicates via SQLite MemoryStore.
+
+CLI Entrypoint:
+    python -m agents.trend_scout [--dry-run] [--live]
+"""
 
 import argparse
 import json
 import logging
 import os
 import re
-import sys
 import urllib.request
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List
 
 from agents.memory_store import MemoryStore
 
@@ -33,12 +41,27 @@ log = logging.getLogger("trend_scout")
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 TOPIC_QUEUE_KEY = "topics:scored_queue"
 
-# Core Almighty Anand Pillars & Keywords
 PILLAR_KEYWORDS = {
     "finance": ["rbi", "bank", "scam", "fraud", "cyber", "penalty", "mandate", "tax", "charge", "debit", "upi", "card"],
-    "technology": ["ai", "tool", "hack", "update", "google", "microsoft", "deepseek", "chatgpt", "gemini", "cyberattack", "security", "zero-day"],
+    "technology": ["ai", "tool", "hack", "update", "google", "microsoft", "deepseek", "chatgpt", "gemini", "cyberattack", "security", "zero-day", "agent"],
     "career": ["job", "salary", "layoff", "promotion", "corporate", "remote", "productivity", "interview"],
 }
+
+# Filter out corporate PR fluff, executive interviews, and sponsored articles
+PR_INTERVIEW_PATTERNS = [
+    r"\bin conversation with\b",
+    r"\bexclusive interview\b",
+    r"\bq&a\b",
+    r"\bsponsored\b",
+    r"\bpartner content\b",
+    r"\bbrand spotlight\b",
+    r"\bpress release\b",
+    r"\bwebinar\b",
+    r"\bceo says\b",
+    r"\bmd & ceo\b",
+    r"\bco-founder explains\b",
+    r"\batmanirbhar\b.*\bbusiness\b",
+]
 
 
 @dataclass
@@ -80,6 +103,11 @@ class TrendScout:
             except Exception as e:
                 log.warning(f"Redis unavailable ({e}), running in local mode")
 
+    @staticmethod
+    def _is_pr_or_interview(title: str) -> bool:
+        t = title.lower()
+        return any(re.search(pat, t) for pat in PR_INTERVIEW_PATTERNS)
+
     def _score_channel_fit(self, title: str) -> tuple[float, str]:
         t = title.lower()
         best_cat = "technology"
@@ -91,7 +119,6 @@ class TrendScout:
                 max_matches = matches
                 best_cat = cat
 
-        # Base score 7.0 + up to 2.5 for keyword matches
         score = min(9.8, 7.0 + (max_matches * 0.9))
         return round(score, 1), best_cat
 
@@ -101,11 +128,10 @@ class TrendScout:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"})
         try:
             with urllib.request.urlopen(req, timeout=8) as resp:
-                xml_data = resp.read()
-                root = ET.fromstring(xml_data)
+                root = ET.fromstring(resp.read())
                 for item in root.findall(".//item"):
                     raw_title = item.find("title").text if item.find("title") is not None else ""
-                    if not raw_title:
+                    if not raw_title or self._is_pr_or_interview(raw_title):
                         continue
                     traffic_el = item.find("{https://trends.google.com/trending/rss}approx_traffic")
                     traffic_str = traffic_el.text if traffic_el is not None else "100+"
@@ -132,28 +158,31 @@ class TrendScout:
     def fetch_google_news_india(self) -> List[TopicCandidate]:
         candidates = []
         queries = [
-            "OpenAI+OR+Google+Gemini+OR+DeepSeek+OR+AI+agent+release",
-            "AI+breakthrough+OR+autonomous+coding+OR+tech+innovation",
+            "OpenAI+OR+Google+Gemini+OR+DeepSeek+OR+AI+agent+launch",
+            "RBI+OR+UPI+OR+cyber+scam+alert+India",
+            "new+free+AI+tool+OR+developer+breakthrough",
         ]
         for q in queries:
             url = f"https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:en"
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"})
             try:
                 with urllib.request.urlopen(req, timeout=8) as resp:
-                    xml_data = resp.read()
-                    root = ET.fromstring(xml_data)
+                    root = ET.fromstring(resp.read())
                     for item in root.findall(".//item")[:6]:
                         raw_title = item.find("title").text if item.find("title") is not None else ""
                         if not raw_title:
                             continue
                         clean_title = re.sub(r" - [^-]+$", "", raw_title).strip()
-                        fit_score, cat = self._score_channel_fit(clean_title)
+                        if self._is_pr_or_interview(clean_title):
+                            log.info(f"⏭ Skipping PR/interview article: '{clean_title}'")
+                            continue
 
+                        fit_score, cat = self._score_channel_fit(clean_title)
                         cand = TopicCandidate(
                             title=clean_title,
                             source="google_news_india",
                             source_url=item.find("link").text if item.find("link") is not None else "",
-                            category="technology",
+                            category=cat,
                             view_count=200000,
                             virality_score=9.0,
                             feasibility_score=8.5,
@@ -169,21 +198,19 @@ class TrendScout:
     def discover_live_candidate(self) -> TopicCandidate:
         log.info("🔍 Scouting live trends across Google News India & Google Trends India...")
         pool: List[TopicCandidate] = []
-
-        # 1. Fetch live RSS streams
         pool.extend(self.fetch_google_news_india())
         pool.extend(self.fetch_google_trends_india())
 
-        # 2. Filter out already covered topics in SQLite
         fresh_candidates = []
         for cand in pool:
+            if self._is_pr_or_interview(cand.title):
+                continue
             seen, existing = self.memory.is_topic_seen(cand.title)
             if seen:
                 log.info(f"⏭ Skipping already covered topic: '{cand.title}' (matched: '{existing}')")
             else:
                 fresh_candidates.append(cand)
 
-        # 3. Sort by composite score
         fresh_candidates.sort(key=lambda c: c.composite_score, reverse=True)
 
         if fresh_candidates:
@@ -191,10 +218,9 @@ class TrendScout:
             log.info(f"🎯 Selected #1 Live Fresh Trend: '{selected.title}' (Composite Score: {selected.composite_score}/10)")
             return selected
 
-        # Dynamic fallback if network fails
         log.warning("Live RSS returned empty, generating dynamic real-time trend...")
         fallback = TopicCandidate(
-            title=f"CERT-In High-Alert 2026: New AI Financial Malware Detected in India",
+            title="CERT-In High-Alert 2026: New AI Financial Malware Detected in India",
             source="cert_in_live_alert",
             source_url="https://www.cert-in.org.in",
             category="finance",

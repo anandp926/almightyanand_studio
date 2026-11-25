@@ -17,6 +17,7 @@ venv/
 data/
 renders/
 memory/*.db
+memory/publish_queue.json
 *.mp4
 *.wav
 *.mp3
