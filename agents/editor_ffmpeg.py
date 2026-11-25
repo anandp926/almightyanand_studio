@@ -158,7 +158,9 @@ class EditorFFmpeg:
 
         for idx, (speaker, line_text) in enumerate(segments):
             v_cfg = voices_map.get(speaker, {"voice": "hi-IN-MadhurNeural", "rate": "+8%", "pitch": "+2Hz"})
-            tts_text = re.sub(r"\s*-\s*", "... ", line_text)
+            tts_text = re.sub(r"\s*-\s*", ", ", line_text)
+            tts_text = tts_text.replace("...", ",")  # Snappier Shorts breath pause instead of 0.8s gap
+            tts_text = re.sub(r"\bhi\b", "hee", tts_text, flags=re.IGNORECASE)  # Fix "hi" -> "high"
             chunk_mp3 = tmp_audio_dir / f"seg_{idx:02d}.mp3"
 
             communicate = edge_tts.Communicate(

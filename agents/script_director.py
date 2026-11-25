@@ -24,6 +24,10 @@ script_director.py — Transformative Script & Shot Card Director
 """
 script_director.py — Transformative Script & Shot Card Director
 """
+#!/usr/bin/env python3
+"""
+script_director.py — Transformative Script & Shot Card Director
+"""
 
 import argparse
 import json
@@ -278,7 +282,7 @@ STRICT RULES:
 - Keep sentences 6-10 words max with '...' pauses for natural spoken-word TTS delivery.
 - End with a strong curiosity CTA/question for comments.
 - Order scene_cues strictly 1-to-1 with the narration flow. Never request text, logos, signs, or UI screens in visual_prompt.
-- For each scene_cue, assign 'speaker' from {allowed_speakers}. Switch speakers (e.g., 'skeptic_friend', 'tech_expert', 'mythic_hero', 'villain_heavy') whenever there is dialogue or a contrasting question; otherwise use '{default_speaker}'.
+- MULTI-VOICE RETENTION RULE: You MUST use at least 2 distinct speakers across the 7-8 scene_cues. Use '{default_speaker}' for the main hook/narration, and switch to a contrasting voice (e.g., 'skeptic_friend' or 'female_host' for mid-video questions/doubts, or 'tech_expert' for the key reveal) on 2 of the middle scenes.
 
 Generate valid JSON with:
 "long_form_title": Clickable 16:9 title (Hinglish/English),
@@ -328,6 +332,18 @@ Generate valid JSON with:
                 badge_text=badge,
                 speaker=speaker,
             )))
+
+        # Guarantee at least 1 mid-video voice switch if LLM defaulted all shots to one speaker
+        unique_speakers = {c["speaker"] for c in shot_cards}
+        if len(unique_speakers) == 1 and len(shot_cards) >= 5:
+            alt_q = (
+                "skeptic_friend"
+                if "skeptic_friend" in allowed_speakers
+                else next((s for s in allowed_speakers if s != default_speaker), default_speaker)
+            )
+            alt_r = "tech_expert" if "tech_expert" in allowed_speakers else alt_q
+            shot_cards[2]["speaker"] = alt_q
+            shot_cards[4]["speaker"] = alt_r
 
         long_title = live_data.get("long_form_title") or f"{title}: Real Impact Explained"
         long_body = live_data.get("long_form_summary_hinglish") or live_data.get("hook_hinglish", "")
