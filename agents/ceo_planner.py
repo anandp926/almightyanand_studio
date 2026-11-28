@@ -33,6 +33,9 @@ from agents.memory_store import MemoryStore
 from agents.trend_scout import TrendScout
 from agents.script_director import ScriptDirector
 from agents.editor_ffmpeg import EditorFFmpeg
+from agents.media_dispatcher import active_visual_style
+from agents.settings import env_bool
+from agents.topic_pipeline import NoPublishableTopicError, select_grounded_package
 
 logging.basicConfig(
     level=logging.INFO,
@@ -71,44 +74,41 @@ class CEOPlanner:
         self.director = ScriptDirector(dry_run=dry_run)
         self.editor = EditorFFmpeg(dry_run=dry_run)
 
-    def plan_today(self, render_short: bool = False, override_topic: Optional[str] = None) -> DailyCEODecision:
+    def plan_today(
+        self,
+        render_short: bool = False,
+        override_topic: Optional[str] = None,
+        source_url: Optional[str] = None,
+        allow_ungrounded: bool = False,
+    ) -> DailyCEODecision:
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         log.info("=" * 70)
         log.info(f"👑 CEO PLANNER: INITIATING AUTONOMOUS CONTENT PLAN FOR {today_str}")
         log.info("🎯 North Star: AVD > 75% on Shorts, > 45% Long-form, YPP Monetization under $100/mo")
         log.info("=" * 70)
 
-        # 1. Check for 3-day underperformance pivot
-        current_style = "commentary_broll"
-        pivot_needed, new_style, pivot_reason = self.memory.check_pivot_needed(current_style)
-        if pivot_needed:
-            log.warning(f"🔄 AUTONOMOUS PIVOT TRIGGERED: {pivot_reason}")
-            active_style = new_style
+        # 1. One fixed look; the 3-day style pivot only runs with STYLE_PIVOT_ENABLED=true
+        pivot_needed, pivot_reason = False, "Fixed visual style."
+        if env_bool("STYLE_PIVOT_ENABLED", False):
+            current_style = self.memory.get_latest_style()
+            pivot_needed, active_style, pivot_reason = self.memory.check_pivot_needed(current_style)
+            if pivot_needed:
+                log.warning(f"🔄 AUTONOMOUS PIVOT TRIGGERED: {pivot_reason}")
         else:
-            log.info(f"📊 Style Performance Healthy: Keeping '{current_style}'")
-            active_style = current_style
+            active_style = active_visual_style()[0]
+        log.info(f"🎨 Visual style: '{active_style}'")
 
-        # 2. Scout 100% fresh, live trending topic
-        if override_topic:
-            log.info(f"🎯 Target Topic Overridden via CLI: '{override_topic}'")
-            candidate = self.scout.discover_live_candidate()
-            candidate.title = override_topic
-            candidate.category = "technology"
-            candidate.source = "manual_override"
-        else:
-            candidate = self.scout.discover_live_candidate()
-        log.info(f"✨ Fresh Candidate Locked: '{candidate.title}' (Source: {candidate.source})")
-
-        # 3. Formulate Transformative Hinglish Script & Shot Cards
-        script_pkg = self.director.build_transformative_package(
-            topic_data={
-                "title": candidate.title,
-                "category": candidate.category,
-                "source": candidate.source,
-                "source_url": candidate.source_url,
-            },
-            chosen_style=active_style,
+        # 2–3. Fresh topic with source text, and a script that passes the fact-check.
+        # Raises NoPublishableTopicError when nothing qualifies; no topic is invented.
+        candidate, script_pkg = select_grounded_package(
+            self.scout,
+            self.director,
+            style=active_style,
+            override_topic=override_topic,
+            source_url=source_url,
+            allow_ungrounded=allow_ungrounded,
         )
+        log.info(f"✨ Fresh Candidate Locked: '{candidate.title}' (Source: {candidate.source})")
 
         # 4. Optional Immediate FFmpeg Video Render
         rendered_path = None
@@ -139,17 +139,17 @@ class CEOPlanner:
         decision = DailyCEODecision(
             date=today_str,
             north_star_goal="YPP Monetization ($250 Budget / $100/mo cap, AVD > 75% Shorts)",
-            budget_status="ON_TRACK ($2.15/day avg vs $3.33/day cap)",
+            budget_status="NOT_TRACKED (see the GCP billing budget alerts)",
             active_visual_style=active_style,
             pivot_triggered=pivot_needed,
             pivot_reason=pivot_reason,
             primary_topic=candidate.title,
             topic_source=candidate.source,
             composite_virality_score=candidate.composite_score,
-            deduplication_verified=True,
+            deduplication_verified=candidate.source != "manual_override",
             long_form_16x9_title=script_pkg.long_form_16x9.get("title", ""),
             shorts_variants=script_pkg.shorts_9x16_variants,
-            affiliate_cta=script_pkg.pinned_comment,
+            affiliate_cta=script_pkg.short_description,
             rendered_video_path=rendered_path,
             qa_report=qa_dict,
         )
@@ -168,12 +168,23 @@ def main():
     parser = argparse.ArgumentParser(description="Master CEO Planner Agent")
     parser.add_argument("--run-today", action="store_true", help="Plan today's content package")
     parser.add_argument("--render-short", action="store_true", help="Plan and render Short video with FFmpeg")
-    parser.add_argument("--topic", type=str, default=None, help="Explicit non-banking topic override")
-    parser.add_argument("--dry-run", action="store_true", help="Run without external API calls")
+    parser.add_argument("--topic", type=str, default=None, help="Manual topic title (needs --source-url)")
+    parser.add_argument("--source-url", type=str, default=None, help="Article to ground a manual --topic in")
+    parser.add_argument("--allow-ungrounded", action="store_true", help="Manual --topic only: script without a source")
+    parser.add_argument("--dry-run", action="store_true", help="Skip Redis; LLM and feeds are still called")
     args = parser.parse_args()
 
     planner = CEOPlanner(dry_run=args.dry_run)
-    decision = planner.plan_today(render_short=args.render_short, override_topic=args.topic)
+    try:
+        decision = planner.plan_today(
+            render_short=args.render_short,
+            override_topic=args.topic,
+            source_url=args.source_url,
+            allow_ungrounded=args.allow_ungrounded and bool(args.topic),
+        )
+    except NoPublishableTopicError as e:
+        log.warning(f"No plan today: {e}")
+        raise SystemExit(1)
 
     print("\n--- CEO PLANNER DAILY DECISION ---")
     print(json.dumps(asdict(decision), indent=2))

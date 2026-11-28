@@ -1,0 +1,23 @@
+{
+  "_comment": "One fixed look for every video. Set `active` (or VISUAL_STYLE in .env) to the preset that matches your character: a 3D character needs a 3D-looking backdrop.",
+  "active": "stylised_3d",
+  "presets": {
+    "stylised_3d": {
+      "suffix": "stylised 3D render, soft studio lighting, clean shapes, rich teal and amber palette, shallow depth of field, vertical 9:16, no text, no watermarks"
+    },
+    "anime": {
+      "suffix": "anime illustration, cel shaded, bold clean line art, cinematic lighting, deep blue and magenta palette, vertical 9:16, no text, no watermarks"
+    },
+    "cyberpunk": {
+      "suffix": "cinematic dark futuristic tech illustration, anime cyberpunk aesthetic, vertical 9:16, 8k high quality, no text, no watermarks"
+    }
+  },
+  "host_zone": {
+    "_comment": "Area kept clear in every image for the on-screen host. Pixels on the 1080x1920 frame.",
+    "enabled": true,
+    "x": 40,
+    "bottom": 1440,
+    "height": 520,
+    "composition_prompt": "main subject in the upper right, empty uncluttered lower left corner"
+  }
+}

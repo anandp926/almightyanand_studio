@@ -1,0 +1,39 @@
+{
+  "_comment": "What the channel makes. `pillars` lists the only topic areas the scout may pick from. Each series belongs to one pillar and rotates through its `formats`, so consecutive Shorts do not share a structure.",
+  "pillars": ["technology"],
+  "series": [
+    {
+      "id": "ai_ki_duniya",
+      "name": "AI Ki Duniya",
+      "pillar": "technology",
+      "hashtag": "#AIKiDuniya",
+      "cta": "Roz ek nayi AI cheez, follow karo.",
+      "formats": [
+        {
+          "id": "jugaad_test",
+          "name": "Comic dialogue",
+          "structure": "A two-voice comic exchange. HOST is excited about the tool or update; SIDEKICK doubts it with a funny everyday objection. HOST answers each doubt with a fact from the source. Alternate speakers scene by scene. End on a punchline from SIDEKICK, then HOST's question to the viewer.",
+          "requires_sidekick": true
+        },
+        {
+          "id": "chai_explain",
+          "name": "Everyday analogy story",
+          "structure": "Explain the idea through ONE everyday Indian analogy told as a tiny story (a chai stall, a tiffin service, a wedding caterer, a local train). The made-up scenario is illustration only: every statement about the actual tool or update must come from the source. Close by linking the analogy back to the real thing in one line, then a question to the viewer.",
+          "requires_sidekick": false
+        },
+        {
+          "id": "myth_vs_sach",
+          "name": "Myth vs sach",
+          "structure": "Open with a common belief people have about this topic, voiced by SIDEKICK as if it were obviously true. HOST corrects it using what the source actually says, including one honest limitation if the source mentions one. End with HOST asking what other myth to bust next.",
+          "requires_sidekick": true
+        },
+        {
+          "id": "kya_badla",
+          "name": "What changed",
+          "structure": "Straight and quick: (a) what is new, (b) who it matters to, (c) one thing it still cannot do or one catch, only if the source says so, (d) HOST's light joke about it, (e) a question to the viewer.",
+          "requires_sidekick": false
+        }
+      ]
+    }
+  ]
+}

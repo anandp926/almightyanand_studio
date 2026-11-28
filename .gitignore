@@ -4,6 +4,7 @@
 
 # Python
 __pycache__/
+.pytest_cache/
 *.py[cod]
 *$py.class
 *.egg-info/
@@ -18,6 +19,7 @@ data/
 renders/
 memory/*.db
 memory/publish_queue.json
+memory/playbook_state.json
 *.mp4
 *.wav
 *.mp3
@@ -48,3 +50,7 @@ logs/
 /tmp/
 *.tmp
 .venv
+
+# Music and effects you add are part of the project, unlike rendered audio
+!assets/bgm/**
+!assets/sfx/**

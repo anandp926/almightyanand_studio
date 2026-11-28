@@ -1,0 +1,12 @@
+{
+  "_comment": "Whole-word replacements applied to the text sent to the TTS engine only (captions are untouched). Keys are matched case-sensitively as whole words. Add names and acronyms the voice gets wrong.",
+  "UPI": "यू पी आई",
+  "RBI": "आर बी आई",
+  "OTP": "ओ टी पी",
+  "KYC": "के वाई सी",
+  "EMI": "ई एम आई",
+  "GST": "जी एस टी",
+  "ATM": "ए टी एम",
+  "SEBI": "सेबी",
+  "AI": "ए आई"
+}

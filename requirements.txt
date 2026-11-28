@@ -1,0 +1,19 @@
+# Pinned runtime dependencies for the orchestrator and the two gateway services.
+# Install: pip install -r requirements.txt
+
+# Orchestrator
+redis==8.1.0
+PyYAML==6.0.3
+schedule==1.2.2
+pillow==13.0.0
+edge-tts==7.3.1
+httpx==0.28.1
+huggingface_hub==2.4.0
+google-api-python-client==2.202.0
+google-auth==2.62.2
+google-auth-oauthlib==1.5.0
+google-auth-httplib2==0.4.4
+
+# Gateway services (services/omniroute_server.py, services/freellm_server.py)
+fastapi==0.162.4
+uvicorn==0.54.0

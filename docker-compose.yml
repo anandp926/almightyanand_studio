@@ -1,7 +1,15 @@
 # docker-compose.yml — Always-on CPU Stack (e2-medium)
-# Services: Redis, OmniRoute (Primary Router), FreeLLMAPI (Fallback Aggregator), Orchestrator
+# Services: Redis, OmniRoute (LLM gateway), FreeLLMAPI (fallback aggregator), Orchestrator
+#
+# All three Python services run from one image built from ./Dockerfile with
+# pinned dependencies (requirements.txt). Rebuild after changing requirements:
+#   docker compose up -d --build
 
-version: "3.9"
+x-studio-image: &studio-image
+  image: almighty-studio:local
+  build:
+    context: .
+    dockerfile: Dockerfile
 
 services:
   # ── Redis: Job queue, caching, rate limiting ──────────────────────
@@ -19,11 +27,9 @@ services:
       timeout: 5s
       retries: 3
 
-  # ── FreeLLMAPI: Secondary Free LLM Aggregator ────────────────────
-  # Upstream fallback aggregator wired into OmniRoute
-  # Repo: https://github.com/tashfeenahmed/freellmapi
+  # ── FreeLLMAPI: text-only free-tier aggregator (in-repo service) ──
   freellm:
-    image: python:3.12-slim
+    <<: *studio-image
     restart: unless-stopped
     ports:
       - "8081:8081"
@@ -35,32 +41,25 @@ services:
       - REDIS_URL=redis://redis:6379/1
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - GROQ_API_KEY=${GROQ_API_KEY:-}
-      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
     depends_on:
       redis:
         condition: service_healthy
-    command: >
-      bash -c "pip install --no-cache-dir fastapi uvicorn &&
-               python /app/services/freellm_server.py"
+    command: python /app/services/freellm_server.py
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/health')"]
       interval: 30s
       timeout: 5s
       retries: 3
 
-  # ── OmniRoute: Primary LLM Gateway with Free-Tier Fallback ──────
-  # Intelligent router with token compression & fallback chains
-  # Repo: https://github.com/cheaper-inference/OmniRoute
+  # ── OmniRoute: LLM gateway, text + vision via Gemini (in-repo service) ──
   omniroute:
-    image: python:3.12-slim
+    <<: *studio-image
     restart: unless-stopped
     ports:
       - "8080:8080"
     volumes:
       - ./services:/app/services:ro
       - ./configs/omniroute_config.json:/app/config.json:ro
-      - ./skills:/app/skills:ro
       - ./.env:/app/.env:ro
     environment:
       - PORT=8080
@@ -69,35 +68,32 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - GROQ_API_KEY=${GROQ_API_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
     depends_on:
       redis:
         condition: service_healthy
       freellm:
         condition: service_healthy
-    command: >
-      bash -c "pip install --no-cache-dir fastapi uvicorn &&
-               python /app/services/omniroute_server.py"
+    command: python /app/services/omniroute_server.py
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
       interval: 30s
       timeout: 5s
       retries: 3
 
-  # ── Orchestrator: Multi-Agent Pipeline Runner & 24/7 Daemon ─────
+  # ── Orchestrator: pipeline runner & IST scheduler ────────────────
   orchestrator:
-    image: python:3.12-slim
+    <<: *studio-image
     working_dir: /app
     restart: unless-stopped
     volumes:
       - ./agents:/app/agents:ro
       - ./infra:/app/infra:ro
-      - ./configs:/app/configs          # Writable for YouTube OAuth token refresh
+      - ./configs:/app/configs          # Writable only for the YouTube OAuth token refresh
       - ./skills:/app/skills:ro
       - ./assets:/app/assets:ro
       - ./data:/app/data
       - ./renders:/app/renders
-      - ./memory:/app/memory
+      - ./memory:/app/memory            # SQLite, publish queue, learned playbook state
       - ./.env:/app/.env:ro
     environment:
       - TZ=Asia/Kolkata
@@ -105,7 +101,6 @@ services:
       - OMNIROUTE_BASE_URL=http://omniroute:8080/v1
       - FREELLM_URL=http://freellm:8081
       - GPU_CONTROLLER_ENABLED=${GPU_CONTROLLER_ENABLED:-false}
-      - YOUTUBE_CHANNEL_ID_EN=${YOUTUBE_CHANNEL_ID_EN:-}
       - YOUTUBE_PRIVACY_STATUS=${YOUTUBE_PRIVACY_STATUS:-public}
       - AUTO_PUBLISH=${AUTO_PUBLISH:-true}
     depends_on:
@@ -113,10 +108,7 @@ services:
         condition: service_healthy
       omniroute:
         condition: service_healthy
-    command: >
-      bash -c "apt-get update && apt-get install -y --no-install-recommends ffmpeg fonts-liberation tzdata &&
-               pip install --no-cache-dir redis httpx pyyaml schedule pillow edge-tts google-api-python-client google-auth-oauthlib &&
-               python -m agents.orchestrator --daemon"
+    command: python -m agents.orchestrator --daemon
 
 volumes:
   redis_data:

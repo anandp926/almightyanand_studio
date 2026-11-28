@@ -1,0 +1,24 @@
+{
+  "_comment": "Who appears in the videos. These are clearly fictional characters, never presented as human experts. Rename them and rewrite the personalities to match your 3D character.",
+  "host": {
+    "name": "Mighty",
+    "speaker": "narrator",
+    "personality": "An over-enthusiastic desi tech fan who gets excited about every new gadget and AI tool, explains things with street-smart everyday comparisons, and laughs at his own jokes.",
+    "catchphrase": "Jugaad mil gaya!"
+  },
+  "sidekick": {
+    "name": "Shanky",
+    "speaker": "skeptic_friend",
+    "personality": "The doubtful friend who trusts nothing new, asks the blunt question everyone is thinking, and delivers dry one-liners."
+  },
+  "humour_rules": [
+    "Keep it clean and warm: the joke is on the situation or on the characters themselves.",
+    "No jokes about religion, caste, gender, region, language, body or any real person or company.",
+    "At most one use of the catchphrase per video, and only where it fits."
+  ],
+  "never": [
+    "Never present a character as a human expert, doctor, lawyer, advisor or journalist.",
+    "Never give financial, investment, legal, medical or political advice, and never tell the viewer what to do with their money or health.",
+    "Never claim the characters personally tested or used anything."
+  ]
+}

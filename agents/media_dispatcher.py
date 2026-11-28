@@ -1,30 +1,22 @@
 #!/usr/bin/env python3
 """
-media_dispatcher.py — 100% Copyright-Free AI Visual Asset Generation & Media Dispatcher
+media_dispatcher.py — AI Visual Asset Generation & Media Dispatcher
 
-MANDATES:
-  1. ZERO WEB SCRAPING: All DuckDuckGo, Bing, Google Image scrapers are DELETED.
-     No stock photography watermarks (Alamy, Adobe Stock, Dreamstime, Shutterstock, Getty).
-  2. 100% AI-GENERATED COPYRIGHT-FREE VISUALS:
-     - Uses each shot card's `visual_prompt` + consistent style suffix:
-       "cinematic dark futuristic tech illustration, anime/cyberpunk aesthetic, vertical 9:16, no text, no watermarks"
-     - Primary: Open-Gen-AI (:8091) when Spot GPU is active.
-     - Secondary: Pollinations.ai FLUX (https://image.pollinations.ai/prompt/{p}?width=1080&height=1920&model=flux&nologo=true)
-     - Tertiary: Official Pexels API (royalty-free, zero watermarks) ONLY if PEXELS_API_KEY is present.
-     - Fallback: Procedural dark cyberpunk vector canvas (guaranteed 0 watermarks).
-  3. AUTO-CROPPING & SAFE FRAMING:
-     - Fits every image using ImageOps.fit(img, (1080, 1920), centering=(0.5, 0.35)).
-  4. GPU LIFECYCLE MANAGEMENT:
-     - Wakes Spot GPU via infra/gpu_controller.py when batch rendering on GCP,
-       with automatic CPU fallback (Edge-TTS + Pollinations Flux) if GPU budget is hit.
+  1. NO WEB SCRAPING: no image-search scrapers, so no stock watermarks.
+  2. GENERATED VISUALS from each shot card's `visual_prompt` + the suffix of the
+     one fixed look in configs/visual_style.json (which also keeps the host's
+     corner of the frame clear):
+     - Open-Gen-AI on the Spot GPU, only when GPU_CONTROLLER_ENABLED=true AND the
+       worker passes a health probe AND it actually returns image bytes.
+     - Pollinations.ai FLUX.
+     - Hugging Face FLUX.1-schnell (needs HF_TOKEN).
+     - Pexels API (needs PEXELS_API_KEY).
+  3. FRAMING: ImageOps.fit(img, (1080, 1920), centering=(0.5, 0.35)).
+  4. RETRIES: `seed_salt` changes the image seeds, so a QA retry gets new
+     visuals instead of regenerating the frames that just failed.
 
 CLI Entrypoint:
-    python -m agents.media_dispatcher [--dry-run]
-"""
-
-#!/usr/bin/env python3
-"""
-media_dispatcher.py — 100% Copyright-Free AI Visual Asset Generation & Media Dispatcher
+    python -m agents.media_dispatcher
 """
 
 import argparse
@@ -33,17 +25,19 @@ import hashlib
 import io
 import json
 import logging
-import os
 import re
+import tempfile
 import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from PIL import Image, ImageOps
+
+from agents.settings import STUDIO_ROOT, env, env_bool
 
 logging.basicConfig(
     level=logging.INFO,
@@ -51,10 +45,38 @@ logging.basicConfig(
 )
 log = logging.getLogger("media_dispatcher")
 
-STYLE_SUFFIX = (
+DEFAULT_STYLE_SUFFIX = (
     "cinematic dark futuristic tech illustration, anime cyberpunk aesthetic, "
     "vertical 9:16, 8k high quality, no text, no watermarks"
 )
+VISUAL_STYLE_PATH = STUDIO_ROOT / "configs" / "visual_style.json"
+
+
+def active_visual_style(path: Optional[Path] = None) -> Tuple[str, str]:
+    """
+    (style name, prompt suffix) of the one look used for every video, from
+    configs/visual_style.json (VISUAL_STYLE in .env overrides `active`). When
+    the host zone is on, the suffix also asks the generator to keep the host's
+    corner clear.
+    """
+    try:
+        cfg = json.loads((path or VISUAL_STYLE_PATH).read_text(encoding="utf-8"))
+    except Exception:
+        return "default", DEFAULT_STYLE_SUFFIX
+    presets = cfg.get("presets", {})
+    name = env("VISUAL_STYLE") or cfg.get("active") or ""
+    if name not in presets:
+        name = cfg.get("active") if cfg.get("active") in presets else next(iter(presets), "")
+    suffix = presets.get(name, {}).get("suffix") or DEFAULT_STYLE_SUFFIX
+    zone = cfg.get("host_zone", {})
+    if zone.get("enabled", True) and env_bool("HOST_ENABLED", True) and zone.get("composition_prompt"):
+        suffix = f"{zone['composition_prompt']}, {suffix}"
+    return name or "default", suffix
+
+
+def work_dir(production_id: str) -> Path:
+    """Scratch directory for one production; removed by the editor after QA."""
+    return Path(tempfile.gettempdir()) / f"almighty_{production_id}"
 
 
 @dataclass
@@ -72,29 +94,33 @@ class DispatchedMediaManifest:
 class MediaDispatcher:
     def __init__(self, dry_run: bool = False):
         self.dry_run = dry_run
-        self.gpu_enabled = os.environ.get("GPU_CONTROLLER_ENABLED", "false").lower() == "true"
-        self.opengenai_url = os.environ.get("OPENGENAI_URL", "http://10.160.0.3:8091")
-        self.hf_token = self._load_env_var("HF_TOKEN") or ""
-        self.pollinations_key = self._load_env_var("POLLINATIONS_API_KEY") or ""
-        self.pexels_key = self._load_env_var("PEXELS_API_KEY") or ""
+        self.gpu_enabled = env_bool("GPU_CONTROLLER_ENABLED", False)
+        self.opengenai_url = env("OPENGENAI_URL", "http://10.128.0.3:8091")
+        self.hf_token = env("HF_TOKEN", "")
+        self.pollinations_key = env("POLLINATIONS_API_KEY", "")
+        self.pexels_key = env("PEXELS_API_KEY", "")
+        self._gpu_usable: Optional[bool] = None  # None = not probed yet
+        self.style_name, self.style_suffix = active_visual_style()
 
-    @staticmethod
-    def _load_env_var(var_name: str) -> Optional[str]:
-        if os.environ.get(var_name):
-            return os.environ[var_name]
-        env_file = Path(__file__).resolve().parent.parent / ".env"
-        if env_file.exists():
-            for line in env_file.read_text().splitlines():
-                if line.startswith(f"{var_name}="):
-                    return line.split("=", 1)[1].strip()
-        return None
+    def _gpu_available(self) -> bool:
+        """Probes the GPU worker once per dispatcher; a dead worker costs 3s, not 20s per shot."""
+        if not self.gpu_enabled:
+            return False
+        if self._gpu_usable is None:
+            try:
+                with urllib.request.urlopen(f"{self.opengenai_url.rstrip('/')}/health", timeout=3) as resp:
+                    self._gpu_usable = resp.status == 200
+            except Exception as e:
+                log.info(f"Open-Gen-AI GPU worker not reachable ({e}); using CPU-side generators.")
+                self._gpu_usable = False
+        return self._gpu_usable
 
     def _call_opengenai_gpu(self, prompt: str) -> Optional[bytes]:
-        if not self.gpu_enabled:
+        if not self._gpu_available():
             return None
         try:
             payload = {
-                "prompt": f"{prompt}, {STYLE_SUFFIX}",
+                "prompt": f"{prompt}, {self.style_suffix}",
                 "aspect_ratio": "9:16",
                 "width": 1080,
                 "height": 1920,
@@ -104,19 +130,21 @@ class MediaDispatcher:
                 data=json.dumps(payload).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
             )
-            with urllib.request.urlopen(req, timeout=20) as resp:
+            with urllib.request.urlopen(req, timeout=60) as resp:
                 data = json.loads(resp.read().decode())
-                if data.get("status") == "success" and data.get("image_bytes"):
-                    return base64.b64decode(data["image_bytes"])
+            if data.get("status") == "success" and data.get("image_bytes"):
+                return base64.b64decode(data["image_bytes"])
+            log.info("Open-Gen-AI answered without image bytes; disabling it for this run.")
         except Exception as e:
-            log.debug(f"Open-Gen-AI GPU worker not reachable ({e})")
+            log.info(f"Open-Gen-AI call failed ({e}); disabling it for this run.")
+        self._gpu_usable = False
         return None
 
     def _generate_flux_pollinations(self, prompt: str, seed: int) -> Optional[bytes]:
         clean_p = re.sub(r"[^\w\s]", " ", prompt)
         clean_p = re.sub(r"\s+", " ", clean_p).strip()
         words = clean_p.split()[:14]
-        full_prompt = f"{' '.join(words)}, {STYLE_SUFFIX}"
+        full_prompt = f"{' '.join(words)}, {self.style_suffix}"
         encoded_p = urllib.parse.quote(full_prompt)
 
         endpoints = [
@@ -124,9 +152,7 @@ class MediaDispatcher:
             f"https://image.pollinations.ai/prompt/{encoded_p}?width=1080&height=1920&model=flux&nologo=true&seed={seed}",
         ]
 
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
-        }
+        headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"}
         if self.pollinations_key:
             headers["Authorization"] = f"Bearer {self.pollinations_key}"
 
@@ -141,32 +167,34 @@ class MediaDispatcher:
                             return data
                         log.warning(f"Pollinations returned small payload ({len(data)} bytes) on attempt {attempt}")
                 except Exception as e:
-                    log.warning(f"Pollinations attempt {attempt} failed on {url.split('?')[0]}: {e}")
+                    log.warning(f"Pollinations attempt {attempt} failed on {url.split('?')[0][:80]}: {e}")
                 if attempt < len(backoffs):
                     time.sleep(wait_s)
         return None
 
-    def _generate_flux_huggingface(self, prompt: str) -> Optional[bytes]:
+    def _generate_flux_huggingface(self, prompt: str, seed: int) -> Optional[bytes]:
         if not self.hf_token:
             return None
         try:
             from huggingface_hub import InferenceClient
             client = InferenceClient(api_key=self.hf_token)
-            img = client.text_to_image(f"{prompt}, {STYLE_SUFFIX}", model="black-forest-labs/FLUX.1-schnell")
+            img = client.text_to_image(
+                f"{prompt}, {self.style_suffix}", model="black-forest-labs/FLUX.1-schnell", seed=seed
+            )
             buf = io.BytesIO()
-            img.save(buf, format="JPEG")
+            img.convert("RGB").save(buf, format="JPEG")
             return buf.getvalue()
         except Exception as e:
-            log.debug(f"HuggingFace FLUX fallback skipped: {e}")
+            log.warning(f"HuggingFace FLUX fallback failed: {e}")
         return None
 
-    def _fetch_pexels_royalty_free(self, query: str) -> Optional[bytes]:
+    def _fetch_pexels_royalty_free(self, query: str, page: int = 1) -> Optional[bytes]:
         if not self.pexels_key:
             return None
         try:
             clean_q = re.sub(r"[^\w\s]", " ", query).strip()
             encoded_q = urllib.parse.quote(" ".join(clean_q.split()[:3]) or "technology")
-            url = f"https://api.pexels.com/v1/search?query={encoded_q}&orientation=portrait&per_page=1"
+            url = f"https://api.pexels.com/v1/search?query={encoded_q}&orientation=portrait&per_page=1&page={page}"
             req = urllib.request.Request(
                 url,
                 headers={"Authorization": self.pexels_key, "User-Agent": "AlmightyAnandStudio/2.0"},
@@ -183,19 +211,24 @@ class MediaDispatcher:
             log.warning(f"Pexels API fallback failed: {e}")
         return None
 
-    def dispatch_media(self, shot_cards: List[dict], production_id: str) -> List[Path]:
-        scenes_dir = Path(f"/tmp/almighty_{production_id}/scenes")
+    def dispatch_media(self, shot_cards: List[dict], production_id: str, seed_salt: int = 0) -> List[Path]:
+        """
+        Generates one 1080x1920 image per shot card. `seed_salt` (the QA attempt
+        number) changes every seed so a retry produces different images.
+        """
+        scenes_dir = work_dir(production_id) / "scenes"
         scenes_dir.mkdir(parents=True, exist_ok=True)
+        for stale in scenes_dir.glob("shot_*"):
+            stale.unlink()
         generated_paths: List[Path] = []
-        failed_shots = 0
 
-        log.info(f"🎨 Generating {len(shot_cards)} real 9:16 scene images for {production_id}...")
+        log.info(f"🎨 Generating {len(shot_cards)} 9:16 scene images for {production_id} (seed salt {seed_salt})...")
 
         for i, card in enumerate(shot_cards, 1):
             target_path = scenes_dir / f"shot_{i:02d}.jpg"
             vis_prompt = card.get("visual_prompt", f"Cinematic tech scene {i}")
             overlay_text = card.get("overlay_text", "")
-            seed = int(hashlib.md5(f"{vis_prompt}_{i}".encode()).hexdigest()[:8], 16) % 100000
+            seed = int(hashlib.md5(f"{vis_prompt}_{i}_{seed_salt}".encode()).hexdigest()[:8], 16) % 100000
 
             image_bytes = None
             source_used = "none"
@@ -215,25 +248,21 @@ class MediaDispatcher:
 
             # 3. Hugging Face Inference FLUX.1-schnell
             if not image_bytes:
-                image_bytes = self._generate_flux_huggingface(vis_prompt)
+                image_bytes = self._generate_flux_huggingface(vis_prompt, seed)
                 if image_bytes:
                     source_used = "huggingface_flux_schnell"
 
             # 4. Official Pexels API (royalty-free only)
             if not image_bytes and self.pexels_key:
-                image_bytes = self._fetch_pexels_royalty_free(f"{overlay_text} technology")
+                image_bytes = self._fetch_pexels_royalty_free(f"{overlay_text} technology", page=1 + seed_salt)
                 if image_bytes:
                     source_used = "pexels_royalty_free"
 
             if not image_bytes:
-                failed_shots += 1
-                log.error(f"❌ Shot {i:02d} failed all real visual generators.")
-                if failed_shots > 1:
-                    raise RuntimeError(
-                        f"Aborting render: {failed_shots} shots failed visual generation. "
-                        "Refusing to emit blank wireframe placeholders."
-                    )
-                raise RuntimeError(f"Shot {i:02d} could not be generated by any visual provider.")
+                raise RuntimeError(
+                    f"Shot {i:02d} could not be generated by any visual provider. "
+                    "Refusing to emit a blank placeholder."
+                )
 
             img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
             # Strip bottom 6% on Pollinations outputs to eliminate corner logo badge
@@ -250,7 +279,8 @@ class MediaDispatcher:
                 "visual_prompt": vis_prompt,
                 "overlay_text": overlay_text,
                 "source": source_used,
-                "copyright_free": True,
+                "style": self.style_name,
+                "seed": seed,
             }))
             generated_paths.append(target_path)
 

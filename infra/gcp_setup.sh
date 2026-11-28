@@ -2,6 +2,14 @@
 # ============================================================================
 # gcp_setup.sh — Provisions GCP infrastructure for Almighty Anand Studio
 # Budget: $100/month ($250 total over 2.5 months)
+#
+# Required environment: GCP_PROJECT_ID, BUDGET_ALERT_EMAIL, BILLING_ACCOUNT_ID
+# (find the billing account with: gcloud billing accounts list)
+#
+# NOTE: a Cloud Billing budget sends alerts. It does NOT stop spending. The
+# only thing that caps spend here is what is running: the e2-medium VM is
+# always on, and the GPU VM is created stopped and nothing in the pipeline
+# starts it.
 # ============================================================================
 set -euo pipefail
 
@@ -14,11 +22,13 @@ GPU_VM_NAME="almighty-gpu-worker"
 NETWORK="almighty-net"
 SUBNET="almighty-subnet"
 BUDGET_ALERT_EMAIL="${BUDGET_ALERT_EMAIL:?Set BUDGET_ALERT_EMAIL}"
+BILLING_ACCOUNT_ID="${BILLING_ACCOUNT_ID:?Set BILLING_ACCOUNT_ID (gcloud billing accounts list)}"
+BUDGET_NAME="almighty-studio-monthly-cap"
 
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║   Almighty Anand Studio — GCP Infrastructure Setup          ║"
 echo "║   Project: ${PROJECT_ID}                                    ║"
-echo "║   Budget:  \$100/month hard cap                              ║"
+echo "║   Budget:  \$100/month (alerts at 50/80/100%)                ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 
 # ── Enable required APIs ───────────────────────────────────────────
@@ -78,7 +88,7 @@ gcloud compute instances create "${CPU_VM_NAME}" \
       echo "Waiting for repo deployment..."
     fi
   ' \
-  --scopes="https://www.googleapis.com/auth/cloud-platform" \
+  --scopes="storage-rw,logging-write,monitoring-write,compute-rw" \
   --quiet 2>/dev/null || echo "  (CPU VM exists)"
 
 echo "  CPU VM IP: $(gcloud compute instances describe ${CPU_VM_NAME} --zone=${ZONE} --project=${PROJECT_ID} --format='get(networkInterfaces[0].accessConfigs[0].natIP)' 2>/dev/null || echo 'pending')"
@@ -112,7 +122,7 @@ gcloud compute instances create "${GPU_VM_NAME}" \
     nvidia-ctk runtime configure --runtime=docker && systemctl restart docker
     systemctl enable docker
   ' \
-  --scopes="https://www.googleapis.com/auth/cloud-platform" \
+  --scopes="storage-rw,logging-write,monitoring-write" \
   --no-restart-on-failure \
   --quiet 2>/dev/null || echo "  (GPU VM exists)"
 
@@ -144,35 +154,54 @@ EOF
 gcloud storage buckets update "gs://${BUCKET_NAME}" \
   --lifecycle-file=/tmp/lifecycle.json --quiet
 
-# ── Budget Alert ───────────────────────────────────────────────────
-echo "▸ Creating budget alert ($100/month)..."
-cat > /tmp/budget.json << EOF
-{
-  "displayName": "almighty-studio-monthly-cap",
-  "amount": {
-    "specifiedAmount": {
-      "currencyCode": "USD",
-      "units": "100"
-    }
-  },
-  "thresholdRules": [
-    {"thresholdPercent": 0.5, "spendBasis": "CURRENT_SPEND"},
-    {"thresholdPercent": 0.8, "spendBasis": "CURRENT_SPEND"},
-    {"thresholdPercent": 1.0, "spendBasis": "CURRENT_SPEND"}
-  ],
-  "notificationsRule": {
-    "monitoringNotificationChannels": [],
-    "disableDefaultIamRecipients": false
-  }
-}
-EOF
-echo "  ⚠ Budget alert must be created via Cloud Console or Billing API."
-echo "  Template saved to /tmp/budget.json"
+# ── Budget Alerts ──────────────────────────────────────────────────
+# Alerts only: emails the billing admins and ${BUDGET_ALERT_EMAIL} at 50%, 80%
+# and 100% of $100/month. It does not stop or cap spending.
+echo "▸ Creating email notification channel for ${BUDGET_ALERT_EMAIL}..."
+CHANNEL_ID="$(gcloud beta monitoring channels list \
+  --project="${PROJECT_ID}" \
+  --filter="type=\"email\" AND labels.email_address=\"${BUDGET_ALERT_EMAIL}\"" \
+  --format='value(name)' 2>/dev/null | head -n1 || true)"
+if [ -z "${CHANNEL_ID}" ]; then
+  CHANNEL_ID="$(gcloud beta monitoring channels create \
+    --project="${PROJECT_ID}" \
+    --display-name="Almighty Studio budget alerts" \
+    --type=email \
+    --channel-labels="email_address=${BUDGET_ALERT_EMAIL}" \
+    --format='value(name)' 2>/dev/null || true)"
+fi
+
+echo "▸ Creating budget alerts (\$100/month)..."
+if gcloud billing budgets list --billing-account="${BILLING_ACCOUNT_ID}" \
+     --format='value(displayName)' 2>/dev/null | grep -qx "${BUDGET_NAME}"; then
+  echo "  (budget exists)"
+else
+  BUDGET_ARGS=(
+    --billing-account="${BILLING_ACCOUNT_ID}"
+    --display-name="${BUDGET_NAME}"
+    --budget-amount=100USD
+    --filter-projects="projects/${PROJECT_ID}"
+    --threshold-rule=percent=0.5
+    --threshold-rule=percent=0.8
+    --threshold-rule=percent=1.0
+  )
+  if [ -n "${CHANNEL_ID}" ]; then
+    BUDGET_ARGS+=(--notifications-rule-monitoring-notification-channels="${CHANNEL_ID}")
+  else
+    echo "  ⚠ Could not create the email channel; alerts will go to billing admins only."
+  fi
+  if gcloud billing budgets create "${BUDGET_ARGS[@]}" --quiet; then
+    echo "  ✅ Budget alerts created."
+  else
+    echo "  ❌ Budget creation FAILED. Create it by hand in Billing → Budgets & alerts." >&2
+    BUDGET_FAILED=1
+  fi
+fi
 
 # ── Summary ────────────────────────────────────────────────────────
 echo ""
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║   ✅ Infrastructure provisioned!                            ║"
+echo "║   Infrastructure provisioned.                               ║"
 echo "║                                                             ║"
 echo "║   CPU VM:  ${CPU_VM_NAME} (always-on, e2-medium)           ║"
 echo "║   GPU VM:  ${GPU_VM_NAME} (stopped, g2-standard-4 Spot)    ║"
@@ -181,3 +210,8 @@ echo "║   Network: ${NETWORK} / ${SUBNET}                         ║"
 echo "║                                                             ║"
 echo "║   Next: Deploy code, set .env, run docker compose up -d    ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
+
+if [ "${BUDGET_FAILED:-0}" = "1" ]; then
+  echo "⚠ Budget alerts were NOT created. There is currently no spend alerting on this project." >&2
+  exit 1
+fi

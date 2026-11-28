@@ -1,0 +1,16 @@
+.git
+.env
+*.env.local
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+data/
+renders/
+memory/*.db
+memory/*.json
+logs/
+tests/
+configs/*token*.json
+configs/*creds*.json
+configs/*secret*
